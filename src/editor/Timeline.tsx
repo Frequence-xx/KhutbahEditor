@@ -425,11 +425,14 @@ export function Timeline({
                 key={key}
                 data-marker-handle
                 onMouseDown={(e) => onMarkerMouseDown(e, key)}
-                className="absolute -top-1 -bottom-1 w-1 cursor-ew-resize z-10"
+                // 16px-wide hit area so the marker is actually grabbable;
+                // the visible bar inside is 2px (border-l), the knob is 12px.
+                className="absolute -top-1 -bottom-1 w-4 -ml-2 cursor-ew-resize z-20"
                 style={{ left: `${pctOf(markers[key])}%` }}
                 title={`${MARKER_LABELS[key]} — ${fmtTime(markers[key])}`}
               >
-                <div className={`absolute -left-1.5 -top-0.5 w-3 h-3 rounded-sm border-2 border-bg-3 ${COLORS[key]}`} />
+                <div className={`absolute left-1.5 top-0 bottom-0 w-px ${COLORS[key]}`} aria-hidden />
+                <div className={`absolute left-0 -top-0.5 w-3 h-3 rounded-sm border-2 border-bg-3 ${COLORS[key]}`} />
               </div>
             ))}
           </div>
@@ -505,7 +508,9 @@ export function Timeline({
               data-playhead-handle
               onMouseDown={onPlayheadMouseDown}
               onClick={(e) => e.stopPropagation()}
-              className="absolute top-3 -left-2.5 w-5 h-5 cursor-ew-resize pointer-events-auto"
+              // Bigger grab target — was 20×20, now 28×28 with -14 offset
+              // so the centre stays aligned with the playhead bar.
+              className="absolute top-2 -left-3.5 w-7 h-7 cursor-ew-resize pointer-events-auto"
               title="Drag to scrub"
             >
               <div className="absolute top-0.5 left-0.5 w-4 h-4 rotate-45 bg-amber border border-bg-3" />

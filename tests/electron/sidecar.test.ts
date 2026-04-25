@@ -42,13 +42,23 @@ describe('SidecarManager — failure modes', () => {
     await m.stop();
   });
 
-  it('rejects in-flight call when sidecar is killed', async () => {
+  it('rejects new calls after sidecar dies', async () => {
     const m = new SidecarManager({ pythonExecutable: PY, moduleEntry: 'khutbah_pipeline', cwd: CWD });
     await m.start();
-    const pending = m.call('ping');
-    // Kill the underlying child — stdout close triggers failAll
-    (m as unknown as { child: ReturnType<typeof import('child_process').spawn> }).child.kill('SIGKILL');
-    await expect(pending).rejects.toBeDefined();
+
+    // Wait for the underlying child to actually exit before asserting manager state.
+    const child = (m as unknown as { child: import('child_process').ChildProcess }).child;
+    const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
+    child.kill('SIGKILL');
+    await exited;
+    // Allow a microtask tick so the exit handler nulls out manager state.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    // call() must throw immediately — not hang on a closed stdin.
+    // The throw is synchronous (this.rpc is null), so we assert via toThrow.
+    expect(() => m.call('ping')).toThrow('Sidecar not started');
+
+    // stop() must be safe to call on an already-dead sidecar.
     await m.stop();
   });
 

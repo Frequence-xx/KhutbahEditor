@@ -51,6 +51,10 @@ export class SidecarManager {
     child.on('exit', (code) => {
       process.stderr.write(`[sidecar] exited with code ${code}\n`);
       this.rpc?.failAll(new Error(`Sidecar exited with code ${code}`));
+      // Null out state so new call() throws 'Sidecar not started' rather than
+      // writing to a closed stdin and hanging forever with no future close/exit.
+      this.rpc = null;
+      this.child = null;
     });
 
     if (!child.stdin || !child.stdout) throw new Error('Sidecar stdio unavailable');
@@ -100,14 +104,15 @@ export class SidecarManager {
         resolve();
       };
 
+      // Single listener survives the SIGKILL fallback — no race window.
+      // If SIGTERM works, onExit fires and clears the timer.
+      // If the timer fires first, it sends SIGKILL without re-wiring; onExit
+      // then catches the SIGKILL-induced exit and resolves.
       child.once('exit', onExit);
-
       child.kill('SIGTERM');
 
       killTimer = setTimeout(() => {
-        child.off('exit', onExit);
         child.kill('SIGKILL');
-        child.once('exit', resolve);
       }, 1000);
     });
   }

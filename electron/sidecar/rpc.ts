@@ -18,10 +18,20 @@ function isRpcResponse(v: unknown): v is RpcResponse {
   const r = v as Record<string, unknown>;
   if (r['jsonrpc'] !== '2.0') return false;
   if (!('id' in r)) return false;
+  const id = r['id'];
+  if (id !== null && typeof id !== 'number' && typeof id !== 'string') return false;
   const hasResult = 'result' in r;
   const hasError = 'error' in r;
   // Exactly one of result/error must be present
-  return hasResult !== hasError;
+  if (hasResult === hasError) return false;
+  if (hasError) {
+    const err = r['error'];
+    if (typeof err !== 'object' || err === null) return false;
+    const e = err as Record<string, unknown>;
+    if (typeof e['code'] !== 'number') return false;
+    if (typeof e['message'] !== 'string') return false;
+  }
+  return true;
 }
 
 export class StdioRpc {

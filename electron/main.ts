@@ -7,6 +7,8 @@ import { registerIpcHandlers } from './ipc/handlers.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged;
 
+const BG_BACKGROUND = '#0C1118'; // matches tailwind colors.bg.1
+
 let mainWindow: BrowserWindow | null = null;
 let sidecar: SidecarManager | null = null;
 
@@ -16,7 +18,7 @@ function createWindow() {
     height: 800,
     minWidth: 1024,
     minHeight: 720,
-    backgroundColor: '#0C1118',
+    backgroundColor: BG_BACKGROUND,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),

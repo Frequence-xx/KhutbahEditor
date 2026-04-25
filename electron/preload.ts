@@ -17,4 +17,13 @@ contextBridge.exposeInMainWorld('khutbah', {
     get: () => ipcRenderer.invoke('settings:get'),
     set: (patch: object) => ipcRenderer.invoke('settings:set', patch),
   },
+  auth: {
+    signIn: () => ipcRenderer.invoke('auth:signIn'),
+    listAccounts: () => ipcRenderer.invoke('auth:listAccounts'),
+    patchAccount: (channelId: string, patch: object) =>
+      ipcRenderer.invoke('auth:patchAccount', channelId, patch),
+    signOut: (channelId: string) => ipcRenderer.invoke('auth:signOut', channelId),
+    accessToken: (channelId: string) =>
+      ipcRenderer.invoke('auth:accessToken', channelId),
+  },
 });

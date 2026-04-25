@@ -1,6 +1,7 @@
 export {};
 
 import type { AppSettings } from '../../electron/store';
+import type { YouTubeAccount } from '../../electron/auth/accounts';
 
 declare global {
   interface Window {
@@ -15,6 +16,20 @@ declare global {
       settings: {
         get: () => Promise<AppSettings>;
         set: (patch: Partial<AppSettings>) => Promise<AppSettings>;
+      };
+      auth: {
+        signIn: () => Promise<{
+          accessToken: string;
+          expiresAt: number;
+          addedAccounts: YouTubeAccount[];
+        }>;
+        listAccounts: () => Promise<YouTubeAccount[]>;
+        patchAccount: (
+          channelId: string,
+          patch: Partial<YouTubeAccount>,
+        ) => Promise<YouTubeAccount | null>;
+        signOut: (channelId: string) => Promise<void>;
+        accessToken: (channelId: string) => Promise<{ accessToken: string; expiresAt: number }>;
       };
     };
   }

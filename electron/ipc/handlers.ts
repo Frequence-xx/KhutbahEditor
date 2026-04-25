@@ -4,6 +4,13 @@ import path from 'path';
 import fs from 'fs/promises';
 import { SidecarManager } from '../sidecar/manager.js';
 import { settingsStore, type AppSettings } from '../store.js';
+import {
+  signInWithGoogle,
+  ensureAccessToken,
+  signOutAccount,
+  listAccounts,
+} from '../auth/youtube-oauth.js';
+import { accounts as accountsStore, type YouTubeAccount } from '../auth/accounts.js';
 
 export function registerIpcHandlers(sidecar: SidecarManager): void {
   ipcMain.handle('pipeline:call', async (_e, args: { method: string; params?: object }) => {
@@ -37,4 +44,13 @@ export function registerIpcHandlers(sidecar: SidecarManager): void {
     }
     return settingsStore.store;
   });
+  ipcMain.handle('auth:signIn', () => signInWithGoogle());
+  ipcMain.handle('auth:listAccounts', () => listAccounts());
+  ipcMain.handle(
+    'auth:patchAccount',
+    (_e, channelId: string, patch: Partial<YouTubeAccount>) =>
+      accountsStore.patch(channelId, patch),
+  );
+  ipcMain.handle('auth:signOut', (_e, channelId: string) => signOutAccount(channelId));
+  ipcMain.handle('auth:accessToken', (_e, channelId: string) => ensureAccessToken(channelId));
 }

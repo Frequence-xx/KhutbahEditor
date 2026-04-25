@@ -71,10 +71,13 @@ export function Upload({ projectId, onBack }: Props) {
     if (window.khutbah) {
       window.khutbah.auth.listAccounts().then((list) => {
         setAccounts(list);
-        // Default selection: all accounts with autoPublish:true; if none, the first account
+        // Default selection: only accounts with autoPublish:true. If the user
+        // hasn't enabled autoPublish on any account, start with an empty
+        // selection — they must explicitly pick which account(s) to publish to.
+        // (Falling back to list[0] would publish to an account the user opted
+        // out of via Settings → Accounts → autoPublish OFF.)
         const auto = list.filter((a) => a.autoPublish).map((a) => a.channelId);
-        if (auto.length > 0) setSelected(new Set(auto));
-        else if (list.length > 0) setSelected(new Set([list[0].channelId]));
+        setSelected(new Set(auto));
       });
     }
   }, [loadSettings]);

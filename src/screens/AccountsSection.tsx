@@ -156,6 +156,7 @@ function AccountRow({
         <div className="flex-1">
           <div className="text-text-strong font-semibold text-sm">{account.channelTitle}</div>
           <div className="text-text-muted text-xs font-mono">{account.channelId}</div>
+          <div className="text-text-muted text-xs">signed in {formatRelativeDate(account.signedInAt)}</div>
         </div>
         <Button variant="ghost" onClick={onSignOut} disabled={busy}>Sign out</Button>
       </div>
@@ -202,4 +203,14 @@ function formatErr(e: unknown): string {
     return String((e as { message: unknown }).message);
   }
   return String(e);
+}
+
+function formatRelativeDate(ms: number): string {
+  const diff = Date.now() - ms;
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  if (days < 1) return 'today';
+  if (days === 1) return 'yesterday';
+  if (days < 7) return `${days} days ago`;
+  if (days < 30) return `${Math.floor(days / 7)} week${Math.floor(days / 7) === 1 ? '' : 's'} ago`;
+  return new Date(ms).toISOString().slice(0, 10);
 }

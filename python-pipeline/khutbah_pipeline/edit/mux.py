@@ -8,20 +8,25 @@ def apply_offset_and_mux(
     offset_seconds: float,
     dst: str,
 ) -> None:
-    """Mux video + offset-shifted audio, dropping the original camera audio.
+    """Mux video + offset-aligned audio, dropping the original camera audio.
 
-    Positive offset_seconds: external audio LAGS the video; pad the audio's
-    front by offset_seconds (FFmpeg `-itsoffset <offset>`).
-
-    Negative offset_seconds: external audio LEADS the video; trim the front
-    of the audio by abs(offset_seconds) (FFmpeg `-ss <abs(offset)>` on the
-    audio input).
+    Convention from align_audio_arrays(sig=audio, ref=video):
+    - positive offset_seconds: audio (sig) content lags ref (video) by N samples
+      in the cross-correlation sense — meaning audio FILE has N seconds of
+      content at the start before reaching the same position as video. To
+      align: TRIM audio front by offset_seconds (use `-ss offset_seconds`).
+    - negative offset_seconds: audio (sig) content leads ref (video) — meaning
+      audio FILE starts AFTER video did, so audio's file-T=0 corresponds to
+      a real-world time |offset_seconds|s into the video. To align: DELAY
+      audio in the output by |offset_seconds|s (use `-itsoffset |offset_seconds|`).
     """
     args = [FFMPEG, "-y", "-i", video_path]
     if offset_seconds >= 0:
-        args += ["-itsoffset", str(offset_seconds), "-i", audio_path]
+        # Audio file has offset_seconds of extra content at start; trim it.
+        args += ["-ss", str(offset_seconds), "-i", audio_path]
     else:
-        args += ["-ss", str(-offset_seconds), "-i", audio_path]
+        # Audio file is shorter at start; delay it in the output.
+        args += ["-itsoffset", str(-offset_seconds), "-i", audio_path]
     args += [
         "-map", "0:v", "-map", "1:a",
         "-c:v", "copy",

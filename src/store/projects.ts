@@ -1,28 +1,33 @@
 import { create } from 'zustand';
 
+export type PartUploadResult = {
+  videoId?: string;
+  status: 'pending' | 'uploading' | 'done' | 'failed';
+  error?: string;
+};
+
+export type Part = {
+  start: number;
+  end: number;
+  confidence?: number;
+  transcript?: string;
+  outputPath?: string;
+  /** Multi-account upload results keyed by channelId. */
+  uploads?: Record<string, PartUploadResult>;
+  /** Legacy single-account fields (Phase 1-3 pre-multi-account). Kept for back-compat
+      until the Upload screen reads from `uploads` map. */
+  videoId?: string;
+};
+
 export type Project = {
-  id: string;            // path-derived hash
+  id: string;
   sourcePath: string;
   proxyPath?: string;
   duration: number;
   createdAt: number;
   status: 'draft' | 'processed' | 'uploaded' | 'failed';
-  part1?: {
-    start: number;
-    end: number;
-    confidence?: number;
-    transcript?: string;
-    outputPath?: string;
-    videoId?: string;
-  };
-  part2?: {
-    start: number;
-    end: number;
-    confidence?: number;
-    transcript?: string;
-    outputPath?: string;
-    videoId?: string;
-  };
+  part1?: Part;
+  part2?: Part;
 };
 
 type State = {
@@ -35,6 +40,7 @@ type State = {
 export const useProjects = create<State>((set) => ({
   projects: [],
   add: (p) => set((s) => ({ projects: [p, ...s.projects] })),
-  update: (id, patch) => set((s) => ({ projects: s.projects.map((p) => p.id === id ? { ...p, ...patch } : p) })),
+  update: (id, patch) =>
+    set((s) => ({ projects: s.projects.map((p) => (p.id === id ? { ...p, ...patch } : p)) })),
   remove: (id) => set((s) => ({ projects: s.projects.filter((p) => p.id !== id) })),
 }));

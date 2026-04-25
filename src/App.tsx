@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { TitleBar } from './components/TitleBar';
 import { Library } from './screens/Library';
 import { NewKhutbah } from './screens/NewKhutbah';
@@ -7,7 +7,9 @@ import { Processing } from './screens/Processing';
 import { Settings } from './screens/Settings';
 import { Upload } from './screens/Upload';
 import { useProjects } from './store/projects';
+import { useSettings } from './store/settings';
 import { useIpcOnce } from './hooks/useIpc';
+import { runAutoPilot } from './lib/autopilot';
 
 type Screen =
   | { name: 'library' }
@@ -19,8 +21,48 @@ type Screen =
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>({ name: 'library' });
+  const [autoPilotProgress, setAutoPilotProgress] = useState<{ stage: string; message: string; progress?: number } | null>(null);
   const addProject = useProjects((s) => s.add);
   const { data } = useIpcOnce<{ ok: boolean; version: string }>('ping');
+
+  useEffect(() => {
+    void useSettings.getState().load();
+  }, []);
+
+  async function maybeAutoPilot(projectId: string): Promise<void> {
+    const settings = useSettings.getState().settings;
+    if (!settings || !settings.autoPilot) {
+      // Fall through to manual flow: Processing screen
+      setScreen({ name: 'processing', projectId });
+      return;
+    }
+    const project = useProjects.getState().projects.find((p) => p.id === projectId);
+    if (!project) return;
+
+    setAutoPilotProgress({ stage: 'detect', message: 'Starting auto-pilot…' });
+    try {
+      const result = await runAutoPilot(project, (p) => setAutoPilotProgress(p));
+      setAutoPilotProgress(null);
+      if (result.mode === 'manual_review') {
+        setScreen({ name: 'editor', projectId });
+      } else if (result.mode === 'auto_complete' || result.mode === 'partial_failure') {
+        const channelIds = Object.keys(result.uploads ?? {});
+        const firstVideo = result.uploads?.[channelIds[0]]?.p1;
+        const errors = Object.values(result.uploads ?? {}).flatMap((u) => u.errors);
+        const body = errors.length > 0
+          ? `Some uploads had issues. ${errors.length} error(s) — open Library to see details.`
+          : `Both parts uploaded to ${channelIds.length} account(s).`;
+        // Phase 4 Task 4.2 will add OS-native notification here.
+        alert(`KhutbahEditor — ${result.mode === 'auto_complete' ? 'Done' : 'Partial failure'}\n\n${body}${firstVideo ? `\n\nhttps://youtube.com/watch?v=${firstVideo}` : ''}`);
+        setScreen({ name: 'library' });
+      }
+    } catch (e: unknown) {
+      setAutoPilotProgress(null);
+      const msg = e && typeof e === 'object' && 'message' in e ? String((e as { message: unknown }).message) : String(e);
+      alert(`Auto-pilot failed: ${msg}`);
+      setScreen({ name: 'editor', projectId });
+    }
+  }
 
   async function startFromYoutube(url: string): Promise<void> {
     if (!window.khutbah) return;
@@ -45,7 +87,7 @@ export default function App() {
         createdAt: Date.now(),
         status: 'draft',
       });
-      setScreen({ name: 'processing', projectId: id });
+      await maybeAutoPilot(id);
     } catch (e: unknown) {
       const msg = e && typeof e === 'object' && 'message' in e
         ? String((e as { message: unknown }).message)
@@ -62,7 +104,7 @@ export default function App() {
       const probe = await window.khutbah.pipeline.call<{ duration: number }>('ingest.probe_local', { path });
       const id = path.replace(/[^a-z0-9]/gi, '_');
       addProject({ id, sourcePath: path, duration: probe.duration, createdAt: Date.now(), status: 'draft' });
-      setScreen({ name: 'processing', projectId: id });
+      await maybeAutoPilot(id);
     } catch (e: unknown) {
       // JSON-RPC errors come through with a `message` field
       const msg = e && typeof e === 'object' && 'message' in e ? String((e as { message: unknown }).message) : String(e);
@@ -126,6 +168,19 @@ export default function App() {
         />
       )}
       {screen.name === 'settings' && <Settings onBack={() => setScreen({ name: 'library' })} />}
+      {autoPilotProgress && (
+        <div className="fixed inset-0 bg-bg-0/80 flex items-center justify-center z-50">
+          <div className="bg-bg-2 border border-border-strong rounded-lg p-6 max-w-md w-full">
+            <h2 className="font-display text-xl tracking-wider text-text-strong mb-2">AUTO-PILOT</h2>
+            <p className="text-text-muted text-sm mb-4">{autoPilotProgress.message}</p>
+            {autoPilotProgress.progress !== undefined && (
+              <div className="h-1 bg-border-strong rounded overflow-hidden">
+                <div className="h-full bg-amber transition-all" style={{ width: `${autoPilotProgress.progress}%` }} />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

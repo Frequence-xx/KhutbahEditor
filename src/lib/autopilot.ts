@@ -142,7 +142,24 @@ export async function runAutoPilot(
 
   for (const account of targets) {
     uploads[account.channelId] = { errors: [] };
-    const accessToken = (await window.khutbah.auth.accessToken(account.channelId)).accessToken;
+
+    let accessToken: string;
+    try {
+      const tk = await window.khutbah.auth.accessToken(account.channelId);
+      accessToken = tk.accessToken;
+    } catch (e) {
+      const msg = e && typeof e === 'object' && 'message' in e
+        ? String((e as { message: unknown }).message)
+        : String(e);
+      uploads[account.channelId].errors.push(`auth: ${msg}`);
+      completedCells += 2; // both parts couldn't even start
+      onProgress({
+        stage: 'upload',
+        message: `Auth failed for ${account.channelTitle}; skipping`,
+        progress: (completedCells / totalCells) * 100,
+      });
+      continue;
+    }
 
     // Per-account effective config
     const titleTpl = effectiveTemplate(settings.titleTemplate, account.titleTemplateOverride);

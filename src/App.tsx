@@ -30,7 +30,12 @@ export default function App() {
   }, []);
 
   async function maybeAutoPilot(projectId: string): Promise<void> {
-    const settings = useSettings.getState().settings;
+    // Ensure settings are loaded BEFORE checking autoPilot flag — fixes cold-start race.
+    let settings = useSettings.getState().settings;
+    if (!settings) {
+      await useSettings.getState().load();
+      settings = useSettings.getState().settings;
+    }
     if (!settings || !settings.autoPilot) {
       // Fall through to manual flow: Processing screen
       setScreen({ name: 'processing', projectId });

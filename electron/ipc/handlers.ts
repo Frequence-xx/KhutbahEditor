@@ -62,13 +62,32 @@ export function registerIpcHandlers(sidecar: SidecarManager): void {
   );
   ipcMain.handle('auth:signOut', (_e, channelId: string) => signOutAccount(channelId));
   ipcMain.handle('auth:accessToken', (_e, channelId: string) => ensureAccessToken(channelId));
+  const NOTIFY_ALLOWED_HOSTS = new Set([
+    'www.youtube.com', 'youtube.com', 'm.youtube.com', 'youtu.be',
+  ]);
+
   ipcMain.handle('notify', (_e, args: { title: string; body: string; clickUrl?: string }) => {
+    if (!Notification.isSupported()) {
+      console.warn('[notify] Native notifications not supported on this OS');
+      return;
+    }
     const n = new Notification({ title: args.title, body: args.body });
     if (args.clickUrl) {
-      n.on('click', () => {
-        // Use shell.openExternal to route to system browser, not Electron child window.
-        shell.openExternal(args.clickUrl!);
-      });
+      let validUrl: URL | null = null;
+      try {
+        const parsed = new URL(args.clickUrl);
+        if (parsed.protocol === 'https:' && NOTIFY_ALLOWED_HOSTS.has(parsed.hostname)) {
+          validUrl = parsed;
+        }
+      } catch {
+        // Invalid URL — ignore.
+      }
+      if (validUrl) {
+        const safeUrl = validUrl.toString();
+        n.on('click', () => {
+          shell.openExternal(safeUrl);
+        });
+      }
     }
     n.show();
   });

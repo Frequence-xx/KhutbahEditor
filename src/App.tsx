@@ -20,6 +20,38 @@ export default function App() {
   const addProject = useProjects((s) => s.add);
   const { data } = useIpcOnce<{ ok: boolean; version: string }>('ping');
 
+  async function startFromYoutube(url: string): Promise<void> {
+    if (!window.khutbah) return;
+    try {
+      // Probe the URL first to populate duration / fail fast on invalid URLs
+      const info = await window.khutbah.pipeline.call<{ duration: number; title: string; id: string }>(
+        'ingest.youtube_info',
+        { url },
+      );
+      // Reserve an output dir for the download
+      const dir = await window.khutbah.paths.defaultOutputDir();
+      await window.khutbah.paths.ensureDir(dir);
+      const dl = await window.khutbah.pipeline.call<{ path: string }>(
+        'ingest.youtube_download',
+        { url, output_dir: dir },
+      );
+      const id = url.replace(/[^a-z0-9]/gi, '_').slice(-32);
+      addProject({
+        id,
+        sourcePath: dl.path,
+        duration: info.duration,
+        createdAt: Date.now(),
+        status: 'draft',
+      });
+      setScreen({ name: 'processing', projectId: id });
+    } catch (e: unknown) {
+      const msg = e && typeof e === 'object' && 'message' in e
+        ? String((e as { message: unknown }).message)
+        : String(e);
+      alert(`Cannot fetch this YouTube URL: ${msg}`);
+    }
+  }
+
   async function pickAndCreate() {
     if (!window.khutbah) return;
     const path = await window.khutbah.dialog.openVideo();
@@ -61,7 +93,11 @@ export default function App() {
         />
       )}
       {screen.name === 'new' && (
-        <NewKhutbah onPickFile={pickAndCreate} onCancel={() => setScreen({ name: 'library' })} />
+        <NewKhutbah
+          onPickFile={pickAndCreate}
+          onYoutubeUrl={startFromYoutube}
+          onCancel={() => setScreen({ name: 'library' })}
+        />
       )}
       {screen.name === 'processing' && (
         <Processing

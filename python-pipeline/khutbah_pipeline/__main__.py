@@ -3,6 +3,7 @@ import os
 from typing import Any
 from khutbah_pipeline.rpc import RpcServer, register
 from khutbah_pipeline.ingest.local import probe_local
+from khutbah_pipeline.ingest.youtube import info_only, download
 from khutbah_pipeline.edit.proxy import generate_proxy
 from khutbah_pipeline.edit.smartcut import smart_cut
 from khutbah_pipeline.detect.pipeline import run_detection_pipeline
@@ -39,6 +40,16 @@ def _smart_cut(
         target_lra=target_lra,
     )
     return {"output": dst}
+
+@register("ingest.youtube_info")
+def _yt_info(url: str) -> dict[str, Any]:
+    return info_only(url)
+
+
+@register("ingest.youtube_download")
+def _yt_dl(url: str, output_dir: str) -> dict[str, str]:
+    return {"path": download(url, output_dir)}
+
 
 @register("detect.run")
 def _detect(audio_path: str, model_dir: str = "") -> dict[str, Any]:

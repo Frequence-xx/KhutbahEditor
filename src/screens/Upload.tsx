@@ -216,6 +216,18 @@ export function Upload({ projectId, onBack }: Props) {
           <span className="ml-auto text-text-muted text-sm" aria-label="signed in account">
             {accounts[0].channelTitle}
           </span>
+          <Button
+            variant="ghost"
+            onClick={async () => {
+              if (!window.khutbah) return;
+              if (!confirm(`Sign out of ${accounts[0].channelTitle}?`)) return;
+              await window.khutbah.auth.signOut(accounts[0].channelId);
+              const list = await window.khutbah.auth.listAccounts();
+              setAccounts(list);
+            }}
+          >
+            Sign out
+          </Button>
         </div>
         <div className="grid grid-cols-2 gap-6">
           {(['p1', 'p2'] as const).map((k) => {

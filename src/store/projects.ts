@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
 
 export type PartUploadResult = {
   videoId?: string;
@@ -37,10 +38,18 @@ type State = {
   remove: (id: string) => void;
 };
 
-export const useProjects = create<State>((set) => ({
-  projects: [],
-  add: (p) => set((s) => ({ projects: [p, ...s.projects] })),
-  update: (id, patch) =>
-    set((s) => ({ projects: s.projects.map((p) => (p.id === id ? { ...p, ...patch } : p)) })),
-  remove: (id) => set((s) => ({ projects: s.projects.filter((p) => p.id !== id) })),
-}));
+// Persisted to localStorage so projects survive HMR / page reload during dev,
+// AND survive app restarts in production. (Project records are metadata only —
+// the actual video files live on disk under the user's output dir.)
+export const useProjects = create<State>()(
+  persist(
+    (set) => ({
+      projects: [],
+      add: (p) => set((s) => ({ projects: [p, ...s.projects] })),
+      update: (id, patch) =>
+        set((s) => ({ projects: s.projects.map((p) => (p.id === id ? { ...p, ...patch } : p)) })),
+      remove: (id) => set((s) => ({ projects: s.projects.filter((p) => p.id !== id) })),
+    }),
+    { name: 'khutbah-projects', storage: createJSONStorage(() => localStorage) },
+  ),
+);

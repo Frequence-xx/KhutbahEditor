@@ -246,7 +246,7 @@ export default function App() {
             </span>
             <button
               onClick={() => setScreen({ name: 'settings' })}
-              className="text-text-muted hover:text-text-strong"
+              className="text-text-muted hover:text-text-strong text-2xl leading-none p-1"
               aria-label="Settings"
             >
               ⚙

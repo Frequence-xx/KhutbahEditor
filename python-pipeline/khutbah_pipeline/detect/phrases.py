@@ -69,19 +69,24 @@ def find_first_opening(words: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
 
 def find_last_closing(
     words: list[dict[str, Any]],
-    dominant_lang: str,
+    dominant_lang: str = "ar",   # informational; kept for API stability
     search_from_word: int = 0,
 ) -> Optional[dict[str, Any]]:
-    """Return the LATEST closing-phrase match across the dominant language and Arabic.
+    """Return the LATEST closing-phrase match across all configured languages.
 
     Per spec §4 stage 5: search dominant language first, then Arabic anyway
-    (Arabic dua often closes a Dutch/English khutbah — code-switch).
-    Pick the latest match.
+    (code-switch case). We simplify by searching ALL languages and returning
+    the latest match — equivalent in result, more robust to per-word language
+    tagging issues (e.g., when whisper assigns a single file-level lang to
+    every word, dominant_lang doesn't reflect Part 2's actual language).
+
+    The dominant_lang parameter is retained for API stability and is unused
+    today; future per-segment language detection may use it as a heuristic.
     """
+    _ = dominant_lang  # noqa: F841 — see docstring
     candidates: list[dict[str, Any]] = []
-    langs_to_check = [dominant_lang] + (["ar"] if dominant_lang != "ar" else [])
-    for lang in langs_to_check:
-        for phrase in CLOSINGS.get(lang, []):
+    for lang in CLOSINGS:
+        for phrase in CLOSINGS[lang]:
             m = _find_phrase(words, phrase, start_at=search_from_word)
             if m:
                 candidates.append(m)

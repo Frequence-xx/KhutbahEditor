@@ -122,27 +122,31 @@ def _yt_dl(
 def _detect(
     audio_path: str,
     model_dir: str = "",
+    device: str = "",
     notify: Optional[Callable[[dict[str, Any]], None]] = None,
 ) -> dict[str, Any]:
     """Run the khutbah detection pipeline.
 
     `model_dir` defaults to:
     1. KHUTBAH_MODEL_DIR env override (used by Electron main to pass the
-       packaged path — set in electron/sidecar/manager.ts at Phase 5)
+       packaged path — set in electron/main.ts)
     2. ../resources/models/whisper-large-v3 relative to cwd (dev path)
 
-    The packaged app bundles the model at <resourcesPath>/models/whisper-large-v3/
-    (see electron-builder.json extraResources). Electron main will set
-    KHUTBAH_MODEL_DIR to that resolved path before spawning the sidecar.
+    `device` defaults to:
+    1. KHUTBAH_COMPUTE_DEVICE env override (set by Electron main from settingsStore)
+    2. "auto" — _resolve_device then picks CUDA if available, otherwise CPU
     """
     if not model_dir:
         model_dir = os.environ.get(
             "KHUTBAH_MODEL_DIR",
             "../resources/models/whisper-large-v3",
         )
+    if not device:
+        device = os.environ.get("KHUTBAH_COMPUTE_DEVICE", "auto")
     return run_detection_pipeline(
         audio_path,
         model_dir,
+        device=device,
         progress_cb=(lambda payload: notify(payload)) if notify else None,
     )
 

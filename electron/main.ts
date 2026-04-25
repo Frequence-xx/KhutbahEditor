@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import electronUpdater from 'electron-updater';
 import { SidecarManager } from './sidecar/manager.js';
 import { registerIpcHandlers } from './ipc/handlers.js';
+import { settingsStore } from './store.js';
 
 const { autoUpdater } = electronUpdater;
 
@@ -128,6 +129,9 @@ function buildSidecarEnv(): Record<string, string> {
   env.KHUTBAH_MODEL_DIR = isDev
     ? path.resolve('resources/models/whisper-large-v3')
     : path.join(process.resourcesPath, 'models', 'whisper-large-v3');
+
+  // Pass the user's compute-device preference so _resolve_device honours it.
+  env.KHUTBAH_COMPUTE_DEVICE = settingsStore.get('computeDevice');
 
   return env;
 }

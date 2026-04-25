@@ -17,8 +17,13 @@ ADHAN_FALLBACK_CONFIDENCE = 0.55  # capped — caller should manual-verify when 
 
 
 # Indirection so tests can monkeypatch
-def _transcribe(audio_path: str, model_dir: str, progress_cb: Optional[Callable[[dict[str, Any]], None]] = None) -> dict[str, Any]:
-    return transcribe_multilingual(audio_path, model_dir, progress_cb=progress_cb)
+def _transcribe(
+    audio_path: str,
+    model_dir: str,
+    device: str = "auto",
+    progress_cb: Optional[Callable[[dict[str, Any]], None]] = None,
+) -> dict[str, Any]:
+    return transcribe_multilingual(audio_path, model_dir, device=device, progress_cb=progress_cb)
 
 
 def _silences(audio_path: str, noise_db: float, min_duration: float) -> list[dict[str, Any]]:
@@ -30,6 +35,7 @@ def run_detection_pipeline(
     model_dir: str,
     silence_noise_db: float = -35.0,
     silence_min_duration: float = 1.5,
+    device: str = "auto",
     progress_cb: Optional[Callable[[dict[str, Any]], None]] = None,
 ) -> dict[str, Any]:
     """Run the 7-stage khutbah detection pipeline.
@@ -40,7 +46,7 @@ def run_detection_pipeline(
     """
     if progress_cb:
         progress_cb({"stage": "transcribe", "message": "Starting transcription…", "progress": 0.0})
-    transcript = _transcribe(audio_path, model_dir, progress_cb=progress_cb)
+    transcript = _transcribe(audio_path, model_dir, device=device, progress_cb=progress_cb)
     duration: float = transcript["duration"]
     words: list[dict[str, Any]] = transcript["words"]
     dominant: str = transcript["lang_dominant"]

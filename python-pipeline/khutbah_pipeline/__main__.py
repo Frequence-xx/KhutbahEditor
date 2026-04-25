@@ -83,7 +83,11 @@ def _yt_dl(
 
 
 @register("detect.run")
-def _detect(audio_path: str, model_dir: str = "") -> dict[str, Any]:
+def _detect(
+    audio_path: str,
+    model_dir: str = "",
+    notify: Optional[Callable[[dict[str, Any]], None]] = None,
+) -> dict[str, Any]:
     """Run the khutbah detection pipeline.
 
     `model_dir` defaults to:
@@ -100,7 +104,11 @@ def _detect(audio_path: str, model_dir: str = "") -> dict[str, Any]:
             "KHUTBAH_MODEL_DIR",
             "../resources/models/whisper-large-v3",
         )
-    return run_detection_pipeline(audio_path, model_dir)
+    return run_detection_pipeline(
+        audio_path,
+        model_dir,
+        progress_cb=(lambda payload: notify(payload)) if notify else None,
+    )
 
 @register("upload.video")
 def _upload(

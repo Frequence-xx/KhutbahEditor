@@ -11,8 +11,8 @@ END_GUARD_SECONDS = 300.0    # 5 min from end — silences past this aren't the 
 
 
 # Indirection so tests can monkeypatch
-def _transcribe(audio_path: str, model_dir: str) -> dict[str, Any]:
-    return transcribe_multilingual(audio_path, model_dir)
+def _transcribe(audio_path: str, model_dir: str, progress_cb: Optional[Callable[[dict[str, Any]], None]] = None) -> dict[str, Any]:
+    return transcribe_multilingual(audio_path, model_dir, progress_cb=progress_cb)
 
 
 def _silences(audio_path: str, noise_db: float, min_duration: float) -> list[dict[str, Any]]:
@@ -33,13 +33,13 @@ def run_detection_pipeline(
     per spec §4.7 ("Defensive paths").
     """
     if progress_cb:
-        progress_cb({"stage": "transcribe", "progress": 0.0})
-    transcript = _transcribe(audio_path, model_dir)
+        progress_cb({"stage": "transcribe", "message": "Starting transcription…", "progress": 0.0})
+    transcript = _transcribe(audio_path, model_dir, progress_cb=progress_cb)
     duration: float = transcript["duration"]
     words: list[dict[str, Any]] = transcript["words"]
     dominant: str = transcript["lang_dominant"]
     if progress_cb:
-        progress_cb({"stage": "detect_boundaries", "progress": 0.7})
+        progress_cb({"stage": "detect_boundaries", "message": "Locating khutbah opening phrase…", "progress": 0.7})
 
     # Stage 3: opening (إن الحمد لله — always Arabic)
     opening = find_first_opening(words)
@@ -51,6 +51,13 @@ def run_detection_pipeline(
     part1_start_conf = sum(
         w["probability"] for w in words[opening["start_word_idx"]:opening["end_word_idx"] + 1]
     ) / n_opening_words
+
+    if progress_cb:
+        progress_cb({
+            "stage": "detect_boundaries",
+            "message": f"Found opening at {part1_start:.0f}s; finding sitting silence…",
+            "progress": 0.85,
+        })
 
     # Stage 4: sitting silence — longest silence in [part1_start + 5min, duration - 5min]
     silences = _silences(audio_path, silence_noise_db, silence_min_duration)
@@ -70,6 +77,13 @@ def run_detection_pipeline(
     part1_end = longest["start"]
     part2_start = longest["end"]
     silence_conf = min(longest["duration"] / 3.0, 1.0)
+
+    if progress_cb:
+        progress_cb({
+            "stage": "detect_boundaries",
+            "message": f"Found sitting silence at {part1_end:.0f}s; finding dua close…",
+            "progress": 0.95,
+        })
 
     # Stage 5: dua end
     p2_first_idx = next(

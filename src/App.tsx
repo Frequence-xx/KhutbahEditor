@@ -11,6 +11,7 @@ import { useProjects } from './store/projects';
 import { useSettings } from './store/settings';
 import { useIpcOnce } from './hooks/useIpc';
 import { runAutoPilot } from './lib/autopilot';
+import { withETA, formatETA, type EnrichedProgress } from './lib/eta';
 
 type Screen =
   | { name: 'welcome' }
@@ -23,7 +24,7 @@ type Screen =
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>({ name: 'library' });
-  const [autoPilotProgress, setAutoPilotProgress] = useState<{ stage: string; message: string; progress?: number } | null>(null);
+  const [autoPilotProgress, setAutoPilotProgress] = useState<EnrichedProgress | null>(null);
   const addProject = useProjects((s) => s.add);
   const { data } = useIpcOnce<{ ok: boolean; version: string }>('ping');
 
@@ -67,7 +68,7 @@ export default function App() {
 
     setAutoPilotProgress({ stage: 'detect', message: 'Starting auto-pilot…' });
     try {
-      const result = await runAutoPilot(project, (p) => setAutoPilotProgress(p));
+      const result = await runAutoPilot(project, (p) => setAutoPilotProgress((prev) => withETA(prev, p)));
       setAutoPilotProgress(null);
       if (result.mode === 'manual_review') {
         setScreen({ name: 'editor', projectId });
@@ -119,13 +120,13 @@ export default function App() {
       // Subscribe to the sidecar's progress notifications during the download.
       unsubscribe = window.khutbah.pipeline.onProgress((params) => {
         if (params.stage === 'download' && typeof params.progress === 'number') {
-          setAutoPilotProgress({
+          setAutoPilotProgress((prev) => withETA(prev, {
             stage: 'detect',
             message: typeof params.message === 'string'
               ? params.message
               : `Downloading "${info.title.slice(0, 60)}"…`,
             progress: Math.round(params.progress * 100),
-          });
+          }));
         }
       });
       // Reserve an output dir for the download
@@ -324,6 +325,9 @@ export default function App() {
               {autoPilotProgress.progress !== undefined && (
                 <span className="ml-auto text-text-muted text-sm font-mono">
                   {Math.round(autoPilotProgress.progress)}%
+                  {autoPilotProgress.etaSeconds !== undefined && autoPilotProgress.etaSeconds > 0 && (
+                    <span className="ml-2 text-text-dim">· ~{formatETA(autoPilotProgress.etaSeconds)} left</span>
+                  )}
                 </span>
               )}
             </div>

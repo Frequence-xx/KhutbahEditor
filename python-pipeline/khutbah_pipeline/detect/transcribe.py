@@ -2,21 +2,50 @@ from collections import Counter
 from typing import Any, Callable, Optional
 
 
+def _detect_device_and_compute(prefer: str = "auto") -> tuple[str, str]:
+    """Detect best available device + compute type for faster-whisper.
+
+    Order: CUDA float16 → CPU int8 (small model, fast on CPU) → CPU float32.
+    Doesn't require torch. ctranslate2 manages CUDA directly via cuDNN/cuBLAS.
+
+    Returns (device, compute_type).
+    """
+    if prefer not in ("auto", "cpu", "cuda"):
+        prefer = "auto"
+
+    if prefer in ("auto", "cuda"):
+        try:
+            import ctranslate2  # type: ignore[import-untyped]
+            cuda_types = ctranslate2.get_supported_compute_types("cuda")
+            if "float16" in cuda_types:
+                return ("cuda", "float16")
+        except Exception:
+            pass  # CUDA not available or ctranslate2 too old
+
+    # CPU fallback — int8 is 3-4x faster than float32 on most CPUs with minor
+    # quality cost on Whisper. faster-whisper recommends int8 for CPU runs.
+    try:
+        import ctranslate2  # type: ignore[import-untyped]
+        cpu_types = ctranslate2.get_supported_compute_types("cpu")
+        if "int8" in cpu_types:
+            return ("cpu", "int8")
+    except Exception:
+        pass
+
+    return ("cpu", "float32")
+
+
 def transcribe_multilingual(
     audio_path: str,
     model_dir: str,
     device: str = "auto",
     compute_type: str = "auto",
-    progress_cb: Optional[Callable[[float], None]] = None,
+    progress_cb: Optional[Callable[[dict[str, Any]], None]] = None,
 ) -> dict[str, Any]:
     """Two-pass: detect language per chunk, then transcribe with locked language.
 
-    Returns:
-      {
-        "duration": <seconds>,
-        "words": [{"word", "start", "end", "probability", "lang"}],
-        "lang_dominant": "ar" | "nl" | "en" | "...",
-      }
+    progress_cb receives dicts of shape:
+      {"stage": "transcribe", "message": str, "progress": float (0-1)}
     """
     # Lazy import — faster_whisper pulls in heavy CTranslate2 deps. We don't
     # want to import it at module import time so that the rest of the pipeline
@@ -24,20 +53,38 @@ def transcribe_multilingual(
     # installed in the dev venv.
     from faster_whisper import WhisperModel  # type: ignore[import-untyped]
 
-    if device == "auto":
-        try:
-            import torch  # type: ignore[import-untyped]
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-        except ImportError:
-            device = "cpu"
+    resolved_device, resolved_compute = (device, compute_type)
+    if device == "auto" or compute_type == "auto":
+        d_auto, c_auto = _detect_device_and_compute(device)
+        if device == "auto":
+            resolved_device = d_auto
+        if compute_type == "auto":
+            resolved_compute = c_auto
 
-    resolved_compute_type = compute_type if compute_type != "auto" else "default"
-    model = WhisperModel(model_dir, device=device, compute_type=resolved_compute_type)
+    if progress_cb:
+        progress_cb({
+            "stage": "transcribe",
+            "message": f"Loading Whisper model ({resolved_device}, {resolved_compute})…",
+            "progress": 0.0,
+        })
 
-    # faster-whisper supports multilingual auto-detect per segment with language=None.
-    # The plan calls for a "two-pass" approach (detect-then-transcribe) but
-    # faster-whisper's `transcribe(language=None, ...)` already performs language
-    # detection internally per segment, so a separate pass is unnecessary.
+    try:
+        model = WhisperModel(model_dir, device=resolved_device, compute_type=resolved_compute)
+    except Exception as e:
+        # If CUDA load fails (missing cuDNN, OOM, etc.), retry on CPU.
+        if resolved_device == "cuda":
+            if progress_cb:
+                progress_cb({
+                    "stage": "transcribe",
+                    "message": f"CUDA load failed ({type(e).__name__}); falling back to CPU int8…",
+                    "progress": 0.0,
+                })
+            resolved_device, resolved_compute = ("cpu", "int8")
+            model = WhisperModel(model_dir, device=resolved_device, compute_type=resolved_compute)
+        else:
+            raise
+
+    # Single-pass transcribe with language=None — faster-whisper auto-detects.
     segments, info = model.transcribe(
         audio_path,
         language=None,
@@ -45,14 +92,19 @@ def transcribe_multilingual(
         vad_filter=True,
         vad_parameters={"min_silence_duration_ms": 500},
     )
-    words: list[dict[str, Any]] = []
-    lang_counter: Counter[str] = Counter()
     duration = info.duration if info.duration else 0.0
 
+    if progress_cb:
+        progress_cb({
+            "stage": "transcribe",
+            "message": f"Transcribing ({resolved_device}, lang={info.language})…",
+            "progress": 0.0,
+        })
+
+    words: list[dict[str, Any]] = []
+    lang_counter: Counter[str] = Counter()
+
     for seg in segments:
-        # info.language is the file-level dominant language; finer per-chunk
-        # detection would require running detect_language() on each VAD chunk
-        # separately. For Phase 2 the file-level lang is sufficient.
         seg_lang = info.language or "ar"
         for w in (seg.words or []):
             words.append({
@@ -64,7 +116,12 @@ def transcribe_multilingual(
             })
             lang_counter[seg_lang] += 1
         if progress_cb and duration > 0:
-            progress_cb(seg.end / duration)
+            frac = max(0.0, min(1.0, seg.end / duration))
+            progress_cb({
+                "stage": "transcribe",
+                "message": f"Transcribing ({resolved_device}) — {int(frac * 100)}%",
+                "progress": frac,
+            })
 
     dominant = lang_counter.most_common(1)[0][0] if lang_counter else "ar"
     return {"duration": duration, "words": words, "lang_dominant": dominant}

@@ -7,7 +7,7 @@ export function Welcome({ onSignIn, onSkip }: Props) {
   return (
     <div className="flex-1 flex items-center justify-center p-8">
       <div className="max-w-md text-center">
-        <Logo className="h-24 mx-auto mb-6" />
+        <Logo className="h-48 mx-auto mb-6" />
         <h1 className="font-display text-3xl tracking-widest text-text-strong mb-3">WELCOME</h1>
         <p className="text-text-muted mb-8">
           Sign in with your YouTube account to enable one-click publishing.

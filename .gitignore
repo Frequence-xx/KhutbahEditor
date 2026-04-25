@@ -20,6 +20,10 @@ build/
 out/
 *.tsbuildinfo
 
+# Python sidecar PyInstaller output
+python-pipeline/build/
+python-pipeline/dist/
+
 # OS
 .DS_Store
 Thumbs.db

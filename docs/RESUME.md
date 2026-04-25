@@ -11,7 +11,15 @@ publishing them to YouTube.
 
 WORKING DIRECTORY: /home/farouq/Development/alhimmah
 GIT BRANCH: main
-GIT REMOTE: git@github.com:Frequence-xx/KhutbahEditor.git
+GIT REMOTE: git@github.com-frequencexx:Frequence-xx/KhutbahEditor.git
+              ↑ uses an SSH alias (~/.ssh/config Host github.com-frequencexx →
+                ~/.ssh/id_ed25519_frequencexx). The default github.com still
+                routes to the talibfitrah identity for other repos. Push works.
+
+ENV FILE: .env exists at repo root (gitignored) with GOOGLE_OAUTH_CLIENT_ID
+          already populated for the Frequence-xx Desktop OAuth client. Verify
+          with `grep GOOGLE_OAUTH_CLIENT_ID .env` — if empty, copy from
+          .env.example and check the lockbox the user keeps it in.
 
 ═══════════════════════════════════════════════════════════════════════
 STEP 1 — READ THESE FILES IN ORDER (do not skip; they are short and load-bearing)
@@ -122,7 +130,18 @@ LOCKED DECISIONS (do not re-litigate without explicit user buy-in)
   • UI: "Dignified Dark" — slate (#0C1118 / #1A2332) + amber (#E8B73C) + green (#7BA05B)
   • Fonts: Cinzel (display) + Open Sans (body) + Amiri (Arabic) — all OFL/Apache 2.0
   • Audio: -14 LUFS / -1 dBTP / 11 LU (EBU R128, two-pass loudnorm)
-  • YouTube auth: shared OAuth client (Frequence-xx Google Cloud), loopback + PKCE
+  • YouTube auth: shared OAuth client (Frequence-xx Google Cloud), loopback + PKCE,
+    MULTI-ACCOUNT (N signed-in YouTube channels per install — same khutbah often
+    published to multiple Al-Himmah channels)
+  • OAuth consent screen state: Testing (NOT Production). 7-day refresh-token
+    lifetime is INTENTIONAL — do not "fix" by pressing Publish app, that would
+    block all sign-ins for 4-6 weeks pending Google's verification + YouTube
+    API services audit. v1 stays in Testing. The app handles invalid_grant
+    per-account gracefully with a re-auth toast.
+  • Playlist support: per-account default playlist; auto-create if missing
+    on that channel (toggleable in Settings)
+  • Per-upload metadata: shared by default, "Customize per account" toggle
+    splits into per-(account, part) metadata panels
   • Distribution: unsigned on all platforms (Mac/Windows/Linux), README documents bypass
   • Auto-pilot: ON by default; Editor opens only when confidence < 90%
 
@@ -130,11 +149,24 @@ LOCKED DECISIONS (do not re-litigate without explicit user buy-in)
 OPEN ITEMS the user handles out-of-band when execution reaches them
 ═══════════════════════════════════════════════════════════════════════
 
-  • Phase 3 needs a Frequence-xx Google Cloud project with OAuth client ID
-    provisioned (~10 min user-side setup)
-  • Phase 5 needs alhimmah.nl/khutbaheditor/privacy hosted (links in Task 5.3)
+  ✓ DONE — Frequence-xx Google Cloud OAuth Client ID provisioned. The Client
+    ID is in .env (gitignored) as GOOGLE_OAUTH_CLIENT_ID. OAuth consent screen
+    is in Testing state with the user's Google account(s) added as test users.
 
-When you reach these tasks, pause and prompt the user — don't try to provision
+  • Phase 3 — when Phase 3 testing begins, confirm with the user which test
+    user emails are added to the consent screen. If a sign-in fails with
+    "App is not verified — only test users allowed," the user needs to add
+    that Google account email under OAuth consent → Test users.
+
+  • Phase 5 — alhimmah.nl/khutbaheditor/privacy must be a real 200-OK page
+    before any production-mode work (which is out of v1 scope anyway). For
+    Testing-mode v1 release a placeholder page suffices.
+
+  • Pre-release — when the user is eventually ready to scale beyond ~100
+    test users, that's a separate ~4-6 week workstream: submit for app
+    verification + YouTube API services audit. Out of scope for v1.
+
+When you reach these gates, pause and prompt the user — don't try to provision
 external accounts on their behalf.
 
 ═══════════════════════════════════════════════════════════════════════

@@ -8,9 +8,9 @@ import { ProgressBar } from '../components/ui/ProgressBar';
 import { useSettings } from '../store/settings';
 import { PartInspector } from '../editor/PartInspector';
 
-type Props = { projectId: string; onBack: () => void };
+type Props = { projectId: string; onBack: () => void; onUpload: () => void };
 
-export function Editor({ projectId, onBack }: Props) {
+export function Editor({ projectId, onBack, onUpload }: Props) {
   const project = useProjects((s) => s.projects.find((p) => p.id === projectId));
   const updateProject = useProjects((s) => s.update);
   const [proxyReady, setProxyReady] = useState<boolean>(!!project?.proxyPath);
@@ -173,6 +173,11 @@ export function Editor({ projectId, onBack }: Props) {
           >
             Export 2 files
           </Button>
+          {project.part1?.outputPath && project.part2?.outputPath && (
+            <Button variant="upload" onClick={onUpload}>
+              ↑ Upload to YouTube
+            </Button>
+          )}
         </div>
       </div>
     </div>

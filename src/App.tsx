@@ -5,6 +5,7 @@ import { NewKhutbah } from './screens/NewKhutbah';
 import { Editor } from './screens/Editor';
 import { Processing } from './screens/Processing';
 import { Settings } from './screens/Settings';
+import { Upload } from './screens/Upload';
 import { useProjects } from './store/projects';
 import { useIpcOnce } from './hooks/useIpc';
 
@@ -13,6 +14,7 @@ type Screen =
   | { name: 'new' }
   | { name: 'processing'; projectId: string }
   | { name: 'editor'; projectId: string }
+  | { name: 'upload'; projectId: string }
   | { name: 'settings' };
 
 export default function App() {
@@ -114,6 +116,13 @@ export default function App() {
         <Editor
           projectId={screen.projectId}
           onBack={() => setScreen({ name: 'library' })}
+          onUpload={() => setScreen({ name: 'upload', projectId: screen.projectId })}
+        />
+      )}
+      {screen.name === 'upload' && (
+        <Upload
+          projectId={screen.projectId}
+          onBack={() => setScreen({ name: 'editor', projectId: screen.projectId })}
         />
       )}
       {screen.name === 'settings' && <Settings onBack={() => setScreen({ name: 'library' })} />}

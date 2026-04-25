@@ -38,6 +38,8 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
   const [exporting, setExporting] = useState<{ p1: number; p2: number } | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const [detecting, setDetecting] = useState<EnrichedProgress | null>(null);
+  const [detectStartedAt, setDetectStartedAt] = useState<number | null>(null);
+  const [detectTick, setDetectTick] = useState<number>(0);
   const [detectionError, setDetectionError] = useState<string | null>(null);
   const [waveform, setWaveform] = useState<number[] | null>(null);
   const [waveformStatus, setWaveformStatus] = useState<'idle' | 'loading' | 'failed'>('idle');
@@ -112,6 +114,8 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
   async function runDetection(): Promise<void> {
     if (!project || !window.khutbah) return;
     setDetectionError(null);
+    setDetectStartedAt(Date.now());
+    setDetectTick(0);
     setDetecting({ stage: 'detect', message: 'Detecting boundaries…' });
     let unsubscribe: (() => void) | null = null;
     try {
@@ -164,8 +168,20 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
     } finally {
       unsubscribe?.();
       setDetecting(null);
+      setDetectStartedAt(null);
     }
   }
+
+  // 1Hz tick that drives the elapsed-time readout while detection runs.
+  // Without this the strip would only re-render when a Python progress event
+  // arrives, leaving long quiet stretches (e.g. Whisper model load) with a
+  // frozen clock — exactly the "no ETA / nothing visible" symptom the user
+  // hit on long runs.
+  useEffect(() => {
+    if (detectStartedAt === null) return;
+    const id = window.setInterval(() => setDetectTick((t) => t + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [detectStartedAt]);
 
   // Lazy-fetch the waveform once the source is known. Background task; on
   // failure we surface waveformStatus='failed' so the user knows why the
@@ -290,32 +306,41 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
           )}
         </div>
       </div>
-      {detecting && (
-        <div className="px-6 py-2 bg-bg-2 border-b border-border-strong">
-          <div className="flex items-center gap-3">
-            <div className="w-2 h-2 rounded-full bg-amber animate-pulse" aria-hidden />
-            <span className="text-text-strong text-sm">{detecting.message}</span>
-            {detecting.progress !== undefined && (
-              <span className="ml-auto text-text-muted text-xs font-mono">
-                {Math.round(detecting.progress)}%
+      {detecting && (() => {
+        // detectTick is in dep array of this IIFE only via re-render — see the
+        // useEffect above that bumps it once per second to keep elapsed live.
+        void detectTick;
+        const elapsedSec =
+          detectStartedAt === null ? 0 : Math.max(0, (Date.now() - detectStartedAt) / 1000);
+        const hasPercent = detecting.progress !== undefined && detecting.progress > 0;
+        return (
+          <div className="px-6 py-2 bg-bg-2 border-b border-border-strong">
+            <div className="flex items-center gap-3">
+              <div className="w-2 h-2 rounded-full bg-amber animate-pulse" aria-hidden />
+              <span className="text-text-strong text-sm">{detecting.message}</span>
+              <span className="ml-auto text-text-muted text-xs font-mono flex items-center gap-3">
+                <span>{formatETA(elapsedSec)} elapsed</span>
+                {hasPercent && (
+                  <span>{Math.round(detecting.progress as number)}%</span>
+                )}
                 {detecting.etaSeconds !== undefined && detecting.etaSeconds > 0 && (
-                  <span className="ml-2 text-text-dim">· ~{formatETA(detecting.etaSeconds)} left</span>
+                  <span className="text-text-dim">~{formatETA(detecting.etaSeconds)} left</span>
                 )}
               </span>
-            )}
+            </div>
+            <div className="h-1 mt-1 bg-border-strong rounded overflow-hidden">
+              {hasPercent ? (
+                <div
+                  className="h-full bg-gradient-to-r from-amber to-amber-dark transition-all duration-300"
+                  style={{ width: `${Math.max(0, Math.min(100, detecting.progress as number))}%` }}
+                />
+              ) : (
+                <div className="h-full bg-gradient-to-r from-transparent via-amber to-transparent animate-pulse" style={{ width: '40%' }} />
+              )}
+            </div>
           </div>
-          <div className="h-1 mt-1 bg-border-strong rounded overflow-hidden">
-            {detecting.progress !== undefined ? (
-              <div
-                className="h-full bg-gradient-to-r from-amber to-amber-dark transition-all duration-300"
-                style={{ width: `${Math.max(0, Math.min(100, detecting.progress))}%` }}
-              />
-            ) : (
-              <div className="h-full bg-gradient-to-r from-transparent via-amber to-transparent animate-pulse" style={{ width: '40%' }} />
-            )}
-          </div>
-        </div>
-      )}
+        );
+      })()}
       {detectionError && !detecting && (
         <div className="px-6 py-2 bg-danger/10 border-b border-danger/40 text-danger text-sm">
           {detectionError}

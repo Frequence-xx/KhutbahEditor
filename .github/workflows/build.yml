@@ -41,17 +41,20 @@ jobs:
         run: |
           node --input-type=module -e "import('./dist-electron/main.js').then(() => console.log('ESM OK')).catch(e => { if (e.code === 'ERR_MODULE_NOT_FOUND') { console.error(e.message); process.exit(1); } console.log('ESM OK (electron not available outside runtime)'); })"
       - name: Lint (ESLint)
-        run: timeout 60 npm run lint
+        run: npm run lint
+        timeout-minutes: 1
         shell: bash
-      - name: TypeScript tests (Vitest, unit only, 300s wrapper)
-        run: timeout 300 npm test
+      - name: TypeScript tests (Vitest, unit only, 5-minute hard cap)
+        run: npm test
+        timeout-minutes: 5
         shell: bash
-      - name: Python tests (Pytest, unit only — exclude @pytest.mark.integration, 300s wrapper)
+      - name: Python tests (Pytest, unit only, 5-minute hard cap)
         working-directory: python-pipeline
+        timeout-minutes: 5
         shell: bash
         run: |
           if [ "${{ runner.os }}" = "Windows" ]; then source .venv/Scripts/activate; else source .venv/bin/activate; fi
-          timeout 300 pytest -m "not integration"
+          pytest -m "not integration"
       - name: Upload test artifacts on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -85,9 +88,12 @@ jobs:
         run: bash resources/fetch-resources.sh Linux x64
       - name: Run integration tests (real FFmpeg + Whisper)
         working-directory: python-pipeline
+        timeout-minutes: 25
         run: |
           source .venv/bin/activate
-          # Integration tests run real Whisper inference; 5+ min is normal. Job timeout-minutes: 30 is the hard cap.
+          # Integration tests run real Whisper inference; 5+ min is normal.
+          # 25-minute step cap is more than 5x the 5-min framework cap; intentional exception
+          # to AGENTS.md's 300s suite policy because Whisper inference is the unavoidable cost.
           pytest -m integration
       - name: Upload integration artifacts on failure
         if: failure()

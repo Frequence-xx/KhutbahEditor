@@ -5,8 +5,17 @@ from typing import Any, Callable, Optional
 def _detect_device_and_compute(prefer: str = "auto") -> tuple[str, str]:
     """Detect best available device + compute type for faster-whisper.
 
-    Order: CUDA float16 → CPU int8 (small model, fast on CPU) → CPU float32.
-    Doesn't require torch. ctranslate2 manages CUDA directly via cuDNN/cuBLAS.
+    Cross-platform / cross-vendor probe order (fastest → safest fallback):
+      1. CUDA float16        — NVIDIA Turing+ (GTX 16xx / RTX), ROCm-built CT2 on AMD
+      2. CUDA int8_float16   — older NVIDIA (Pascal-era) where pure FP16 is slow
+      3. CUDA int8           — last GPU resort
+      4. CPU int8            — Apple Silicon (Accelerate), x86 with AVX-VNNI
+      5. CPU float32         — universal fallback
+
+    ctranslate2 only ships "cuda" and "cpu" device strings. It has no Apple
+    Metal/MPS or Intel-GPU backend, so on Apple Silicon the fast path is CPU
+    int8 with the Accelerate framework — competitive with CUDA on small models.
+    AMD users running a ROCm-built ctranslate2 register their device as "cuda".
 
     Returns (device, compute_type).
     """
@@ -16,19 +25,20 @@ def _detect_device_and_compute(prefer: str = "auto") -> tuple[str, str]:
     if prefer in ("auto", "cuda"):
         try:
             import ctranslate2  # type: ignore[import-untyped]
-            cuda_types = ctranslate2.get_supported_compute_types("cuda")
-            if "float16" in cuda_types:
-                return ("cuda", "float16")
+            cuda_types = set(ctranslate2.get_supported_compute_types("cuda"))
+            for compute in ("float16", "int8_float16", "int8"):
+                if compute in cuda_types:
+                    return ("cuda", compute)
         except Exception:
-            pass  # CUDA not available or ctranslate2 too old
+            pass  # No GPU backend — ctranslate2 built without CUDA, no driver,
+                  # or no compatible GPU/cuDNN. Fall through to CPU.
 
-    # CPU fallback — int8 is 3-4x faster than float32 on most CPUs with minor
-    # quality cost on Whisper. faster-whisper recommends int8 for CPU runs.
     try:
         import ctranslate2  # type: ignore[import-untyped]
-        cpu_types = ctranslate2.get_supported_compute_types("cpu")
-        if "int8" in cpu_types:
-            return ("cpu", "int8")
+        cpu_types = set(ctranslate2.get_supported_compute_types("cpu"))
+        for compute in ("int8", "float32"):
+            if compute in cpu_types:
+                return ("cpu", compute)
     except Exception:
         pass
 

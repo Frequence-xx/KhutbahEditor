@@ -2,24 +2,98 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Callable, Optional
 from urllib.parse import urlparse
 
 YT_DLP: str = shutil.which("yt-dlp") or "yt-dlp"
 
-# YouTube bot-detection / n-challenge bypass requires a JS runtime + the EJS
-# challenge-solver lib. yt-dlp 2026.03.17+ supports both via these flags.
-# - --js-runtimes points at a Node.js binary (or deno/bun/quickjs)
-# - --remote-components ejs:github auto-downloads the solver lib on first run
-# Override the JS runtime path via KHUTBAH_JS_RUNTIME env var; default below
-# is the nvm Node on the developer's primary machine.
-_DEFAULT_JS_RUNTIME = '/home/farouq/.nvm/versions/node/v22.20.0/bin/node'
-JS_RUNTIME: str = os.environ.get('KHUTBAH_JS_RUNTIME', _DEFAULT_JS_RUNTIME)
-YT_DLP_BOT_BYPASS_FLAGS: list[str] = [
-    '--js-runtimes', f'node:{JS_RUNTIME}',
-    '--remote-components', 'ejs:github',
-]
+
+def _semver_key(dirname: str) -> tuple[int, int, int]:
+    """Sort key for nvm version dirs like 'v22.20.0' → (22, 20, 0)."""
+    s = dirname.lstrip('v').split('-')[0]
+    parts = s.split('.')
+    out: list[int] = []
+    for p in parts[:3]:
+        try:
+            out.append(int(p))
+        except ValueError:
+            out.append(0)
+    while len(out) < 3:
+        out.append(0)
+    return (out[0], out[1], out[2])
+
+
+def _discover_js_runtime() -> Optional[str]:
+    """Locate a Node.js binary for yt-dlp's n-challenge solver.
+
+    Cross-platform search order:
+      1. KHUTBAH_JS_RUNTIME env override (developer / packaged-app override)
+      2. shutil.which('node')   — covers system, brew, choco, scoop, and any
+                                  shell whose PATH already includes nvm's shim
+      3. ~/.nvm/versions/node/<version>/bin/node    (nvm POSIX)
+      4. %APPDATA%/nvm/<version>/node.exe           (nvm-windows)
+      5. /opt/homebrew/bin/node, /usr/local/bin/node (brew on Apple Silicon /
+                                                     Intel Macs not on PATH)
+
+    Returns absolute path, or None — yt-dlp will then run without n-challenge
+    bypass and fail loudly on protected videos rather than silently misbehave.
+    """
+    override = os.environ.get('KHUTBAH_JS_RUNTIME')
+    if override and Path(override).is_file():
+        return override
+
+    on_path = shutil.which("node")
+    if on_path:
+        return on_path
+
+    candidates: list[Path] = []
+
+    nvm_root = Path.home() / '.nvm' / 'versions' / 'node'
+    if nvm_root.is_dir():
+        for ver_dir in sorted(nvm_root.iterdir(), key=lambda p: _semver_key(p.name), reverse=True):
+            if ver_dir.is_dir():
+                candidates.append(ver_dir / 'bin' / 'node')
+
+    if sys.platform == "win32":
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            nvm_win = Path(appdata) / 'nvm'
+            if nvm_win.is_dir():
+                for ver_dir in sorted(nvm_win.iterdir(), key=lambda p: _semver_key(p.name), reverse=True):
+                    if ver_dir.is_dir():
+                        candidates.append(ver_dir / 'node.exe')
+
+    if sys.platform == "darwin":
+        candidates.extend([Path('/opt/homebrew/bin/node'), Path('/usr/local/bin/node')])
+
+    for c in candidates:
+        if c.is_file():
+            return str(c)
+
+    return None
+
+
+JS_RUNTIME: Optional[str] = _discover_js_runtime()
+
+
+def _bot_bypass_flags() -> list[str]:
+    """Build yt-dlp's bot-bypass argv. Empty when no Node runtime was found.
+
+    --js-runtimes <name>:<path> tells yt-dlp 2026.03.17+ which JS engine to use
+    for the YouTube n-challenge. --remote-components ejs:github lets it
+    auto-download the EJS solver lib on first use.
+    """
+    if not JS_RUNTIME:
+        return []
+    return [
+        '--js-runtimes', f'node:{JS_RUNTIME}',
+        '--remote-components', 'ejs:github',
+    ]
+
+
+YT_DLP_BOT_BYPASS_FLAGS: list[str] = _bot_bypass_flags()
 
 ALLOWED_HOSTS = {"www.youtube.com", "youtube.com", "m.youtube.com", "youtu.be"}
 

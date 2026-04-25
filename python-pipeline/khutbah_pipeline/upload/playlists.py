@@ -2,6 +2,7 @@
 import json
 import urllib.request
 from typing import Any, Optional
+from khutbah_pipeline.upload.resumable import DEFAULT_TIMEOUT
 
 
 def list_playlists(access_token: str) -> list[dict[str, Any]]:
@@ -14,7 +15,7 @@ def list_playlists(access_token: str) -> list[dict[str, Any]]:
         if page_token:
             url += f"&pageToken={page_token}"
         req = urllib.request.Request(url, headers={"Authorization": f"Bearer {access_token}"})
-        with urllib.request.urlopen(req) as r:
+        with urllib.request.urlopen(req, timeout=DEFAULT_TIMEOUT) as r:
             data = json.loads(r.read())
         out.extend(data.get("items", []))
         page_token = data.get("nextPageToken")
@@ -38,7 +39,7 @@ def create_playlist(
         data=body, method="POST",
         headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req) as r:
+    with urllib.request.urlopen(req, timeout=DEFAULT_TIMEOUT) as r:
         return json.loads(r.read())
 
 
@@ -55,7 +56,7 @@ def add_video_to_playlist(access_token: str, playlist_id: str, video_id: str) ->
         data=body, method="POST",
         headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req) as r:
+    with urllib.request.urlopen(req, timeout=DEFAULT_TIMEOUT) as r:
         return json.loads(r.read())
 
 

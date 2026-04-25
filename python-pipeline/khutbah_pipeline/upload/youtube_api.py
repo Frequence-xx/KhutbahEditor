@@ -3,7 +3,7 @@ import json
 import os
 import urllib.request
 from typing import Any, Callable, Optional
-from khutbah_pipeline.upload.resumable import initiate_upload, upload_file
+from khutbah_pipeline.upload.resumable import DEFAULT_TIMEOUT, initiate_upload, upload_file
 
 
 def upload_video(
@@ -47,7 +47,7 @@ def set_thumbnail(access_token: str, video_id: str, thumbnail_path: str) -> dict
         data=data, method="POST",
         headers={"Authorization": f"Bearer {access_token}", "Content-Type": "image/jpeg"},
     )
-    with urllib.request.urlopen(req) as r:
+    with urllib.request.urlopen(req, timeout=DEFAULT_TIMEOUT) as r:
         return json.loads(r.read())
 
 
@@ -73,5 +73,5 @@ def update_metadata(
         data=json.dumps(body).encode("utf-8"), method="PUT",
         headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req) as r:
+    with urllib.request.urlopen(req, timeout=DEFAULT_TIMEOUT) as r:
         return json.loads(r.read())

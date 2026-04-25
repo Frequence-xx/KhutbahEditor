@@ -1,5 +1,6 @@
 import io
 import json
+import urllib.error
 from unittest.mock import patch, MagicMock
 import pytest
 
@@ -29,6 +30,41 @@ def test_initiate_upload_raises_when_no_location():
     with patch("khutbah_pipeline.upload.resumable.urllib.request.urlopen", return_value=mock_response):
         with pytest.raises(RuntimeError, match="upload Location"):
             initiate_upload("fake-token", {}, {}, file_size=1024)
+
+
+def test_upload_handles_final_chunk_308_via_status_query(tmp_path):
+    """Final chunk returns 308 (server processing); status-query retrieves video_id."""
+    from khutbah_pipeline.upload import resumable
+
+    # Make a tiny "video" file
+    video_file = tmp_path / "test.mp4"
+    video_file.write_bytes(b"x" * 100)  # smaller than CHUNK so loop runs once
+
+    # Mock urlopen: chunk PUT returns 308 (no body), then status-query PUT returns 200 with video JSON.
+    call_count = {"n": 0}
+
+    def fake_urlopen(req, timeout=None):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            # First call: chunk PUT — return 308 to simulate "still processing"
+            raise urllib.error.HTTPError(
+                url="x", code=308, msg="Resume Incomplete", hdrs=None, fp=None
+            )
+        # Second call: status-query — return 200 with video JSON
+        mock = MagicMock()
+        mock.status = 200
+        mock.read.return_value = b'{"id": "abc123XYZ"}'
+        mock.__enter__ = MagicMock(return_value=mock)
+        mock.__exit__ = MagicMock(return_value=False)
+        return mock
+
+    with patch("khutbah_pipeline.upload.resumable.urllib.request.urlopen", side_effect=fake_urlopen):
+        result = resumable.upload_file(
+            "fake-token",
+            "https://upload.youtube.com/whatever",
+            str(video_file),
+        )
+    assert result == {"video_id": "abc123XYZ"}
 
 
 def test_resolve_or_create_playlist_uses_existing_id():

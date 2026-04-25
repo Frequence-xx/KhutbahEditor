@@ -42,7 +42,9 @@ def generate_proxy(
         subprocess.run(cmd, check=True, capture_output=True)
         return
 
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    proc = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1,
+    )
     try:
         if proc.stdout is None:
             raise RuntimeError("ffmpeg stdout unavailable")
@@ -56,14 +58,11 @@ def generate_proxy(
             done_s = out_us / 1_000_000
             payload: dict[str, Any] = {
                 "stage": "proxy",
-                "message": f"Generating preview proxy… {done_s:.0f}s",
+                "message": "Generating preview proxy…",
             }
             if duration:
                 frac = max(0.0, min(1.0, done_s / duration))
                 payload["progress"] = frac
-                payload["message"] = (
-                    f"Generating preview proxy… {done_s:.0f}/{duration:.0f}s"
-                )
             progress_cb(payload)
         proc.wait()
         if proc.returncode != 0:

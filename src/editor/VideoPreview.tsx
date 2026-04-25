@@ -11,10 +11,11 @@ type Props = {
   src: string;
   onTimeUpdate?: (t: number) => void;
   onLoadedMetadata?: (duration: number) => void;
+  onPlayingChange?: (playing: boolean) => void;
 };
 
 export const VideoPreview = forwardRef<VideoHandle, Props>(function VideoPreview(
-  { src, onTimeUpdate, onLoadedMetadata },
+  { src, onTimeUpdate, onLoadedMetadata, onPlayingChange },
   ref,
 ) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -37,13 +38,21 @@ export const VideoPreview = forwardRef<VideoHandle, Props>(function VideoPreview
     if (!v) return;
     const onTime = () => onTimeUpdate?.(v.currentTime);
     const onMeta = () => onLoadedMetadata?.(v.duration);
+    const onPlay = () => onPlayingChange?.(true);
+    const onPause = () => onPlayingChange?.(false);
     v.addEventListener('timeupdate', onTime);
     v.addEventListener('loadedmetadata', onMeta);
+    v.addEventListener('play', onPlay);
+    v.addEventListener('pause', onPause);
+    v.addEventListener('ended', onPause);
     return () => {
       v.removeEventListener('timeupdate', onTime);
       v.removeEventListener('loadedmetadata', onMeta);
+      v.removeEventListener('play', onPlay);
+      v.removeEventListener('pause', onPause);
+      v.removeEventListener('ended', onPause);
     };
-  }, [onTimeUpdate, onLoadedMetadata]);
+  }, [onTimeUpdate, onLoadedMetadata, onPlayingChange]);
 
   return (
     <div className="bg-black rounded-md aspect-video relative border border-border-strong overflow-hidden">

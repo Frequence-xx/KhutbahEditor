@@ -18,6 +18,7 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
   const [error, setError] = useState<string | null>(null);
   const videoRef = useRef<VideoHandle>(null);
   const [currentTime, setCurrentTime] = useState<number>(0);
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const reset = useMarkers((s) => s.reset);
   const setMarker = useMarkers((s) => s.setMarker);
   const setDuration = useMarkers((s) => s.setDuration);
@@ -185,6 +186,7 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
               ref={videoRef}
               src={`khutbah-file://${project.proxyPath}`}
               onTimeUpdate={setCurrentTime}
+              onPlayingChange={setIsPlaying}
             />
           )}
           <div className="mt-3 text-text-muted text-xs font-mono">Time: {currentTime.toFixed(2)} s</div>
@@ -196,6 +198,11 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
       <Timeline
         currentTime={currentTime}
         onSeek={(t) => videoRef.current?.seek(t)}
+        onPlayPause={() => {
+          if (isPlaying) videoRef.current?.pause();
+          else videoRef.current?.play();
+        }}
+        isPlaying={isPlaying}
       />
       <div className="px-6 py-3 border-t border-border-strong flex items-center gap-3">
         {exportError && <span className="text-danger text-xs">{exportError}</span>}

@@ -263,9 +263,16 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
         const progress = typeof params.progress === 'number' ? Math.round(params.progress * 100) : undefined;
         setDetecting((prev) => withETA(prev, { stage, message, progress }));
       });
+      // Pass the current computeDevice setting per-call so the user's
+      // Settings change takes effect without needing a sidecar restart.
+      // The sidecar's KHUTBAH_COMPUTE_DEVICE env was captured at spawn
+      // time and would otherwise stay stale.
       const result = await window.khutbah.pipeline.call<DetectionResult>(
         'detect.run',
-        { audio_path: project.sourcePath },
+        {
+          audio_path: project.sourcePath,
+          device: settings?.computeDevice ?? 'auto',
+        },
       );
       if ('error' in result) {
         setDetectionError(

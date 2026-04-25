@@ -138,21 +138,134 @@ When you reach these tasks, pause and prompt the user — don't try to provision
 external accounts on their behalf.
 
 ═══════════════════════════════════════════════════════════════════════
+ONE-SHOT EXECUTION MANDATE
+═══════════════════════════════════════════════════════════════════════
+
+This is a ONE-SHOT execution session. You have STANDING AUTHORIZATION to execute
+the entire plan from the next uncommitted task all the way through tagging the
+release, in a single session, without asking permission task-by-task.
+
+You do not ask "should I proceed?", "ready for the next task?", "want me to run
+the review now?", or any other permission-seeking question. The plan is the
+authorization. Execute it.
+
+═══════════════════════════════════════════════════════════════════════
+THE 95% CERTAINTY RULE — HOW DECISIONS GET MADE
+═══════════════════════════════════════════════════════════════════════
+
+Every decision point during execution gets one of three outcomes:
+
+  ACT      — you are ≥95% certain of the right call. Do it. No question.
+
+  RESEARCH — you are <95% certain. Do not act yet, do not escalate yet.
+             Instead: read more code, run more commands, check spec/plan
+             cross-references, search the docs, read the library source,
+             run a small experiment, write a probe test, fetch upstream
+             docs via context7 or web search, inspect git blame, read
+             prior commits — whatever it takes to RAISE your certainty
+             to ≥95%. Iterate the research loop until you cross the bar.
+
+  ESCALATE — only if you've exhausted research and still can't reach 95%
+             (genuinely ambiguous spec, missing external info that only
+             the user has, conflicting authoritative sources). Surface
+             ONE clear question with the research you've already done
+             and the specific blocker. Wait for an answer.
+
+Default to RESEARCH, not ESCALATE. A long research loop that reaches a confident
+decision is always better than a quick escalation that interrupts the user.
+A wrong action is worse than research that takes time.
+
+Concrete examples:
+
+  • Subagent's diff doesn't match the task spec
+       → RESEARCH (read both, re-run the spec's test, run `git diff`,
+         understand the deviation) → ACT (either accept the better
+         implementation if you can prove it's actually better, or send
+         the subagent back with a precise correction).
+       Don't escalate to user unless the deviation is a deliberate
+       design departure that requires user judgment.
+
+  • Two reviewers disagree on a Level-1 review verdict
+       → RESEARCH (read the code yourself, read both reviews, identify
+         the substantive technical claim under each) → ACT (take the
+         stricter view per AGENTS.md reconciliation rule, document the
+         call in the next commit).
+
+  • A library's API surface differs from the plan's example code
+       → RESEARCH (use context7 or fetch the library's current docs,
+         check the installed version with `npm ls X` or `pip show X`)
+         → ACT (update the call site to match real API, note the
+         deviation in commit body).
+
+  • A test is flaky on the second consecutive run
+       → RESEARCH (read the test, identify the timing/state dependency
+         per AGENTS.md flakiness section) → ACT (fix the root cause,
+         not the symptom; if you can't find root cause after thorough
+         investigation, then ESCALATE).
+
+  • Auto-pilot fails on the canonical test khutbah
+       → RESEARCH (capture the failing stage's error, inspect the
+         intermediate artifacts, check Whisper output, check silence
+         detection output) → ACT (fix forward) OR ESCALATE only if the
+         issue points to something requiring user account access.
+
+The bar is 95% certainty about the RIGHT CALL, not 95% certainty about the
+outcome. You can be 95% sure that "send the subagent back with this
+correction" is right even if you're 60% sure whether the corrected
+implementation will pass on the first try. Research sufficiently to know
+the right action, then take it.
+
+═══════════════════════════════════════════════════════════════════════
+ESCALATION POINTS — THE ONLY REASONS TO STOP
+═══════════════════════════════════════════════════════════════════════
+
+Stop and prompt the user only on:
+
+  1. Open external-setup item the user has to do themselves
+     (Phase 3: Frequence-xx Google Cloud OAuth client provisioning;
+      Phase 5: alhimmah.nl/khutbaheditor/privacy page hosting).
+     Stop, surface the requirement clearly, wait.
+
+  2. A Phase Review Gate verdict of REJECT after good-faith research-and-fix
+     iteration — i.e., you genuinely cannot get the gate to APPROVE without
+     re-architecting something the user previously locked.
+
+  3. A locked design decision that you are ≥95% certain is actually wrong
+     and that affects the current task. Don't silently change it.
+     Surface the issue, your evidence, and your recommended replacement.
+
+  4. A genuine ambiguity in the spec or plan that no amount of research
+     resolves (rare — most "ambiguities" yield to careful reading).
+
+  5. Destructive operations the user must authorize:
+       • git push --force, git reset --hard, git branch -D
+       • rm -rf outside of build/dist/node_modules dirs
+       • git config --global changes
+       • paid API calls beyond the canonical test khutbah
+       • OAuth account changes
+       • Public PR comments / external messages
+
+  6. The user explicitly interrupts.
+
+That's the full list. Everything else: RESEARCH → ACT.
+
+═══════════════════════════════════════════════════════════════════════
 START NOW
 ═══════════════════════════════════════════════════════════════════════
 
-After completing Steps 1-3, report back with:
+Do this in order, without prompting between steps:
 
-  1. Current phase + last completed task (from git log)
-  2. The next task you'll dispatch (number + name from the plan)
-  3. Any state issues found (uncommitted changes, missing tags, etc.)
+  1. Run Steps 1-3 (read the four files, check git state, invoke the
+     subagent-driven-development skill).
+  2. Identify the next uncommitted task from the plan.
+  3. Briefly state (one line each): current phase, next task number, any
+     state issues. No questions.
+  4. Dispatch the first subagent for that task. Continue executing the
+     plan, applying the 95% certainty rule, until you hit one of the
+     six escalation points or the v1.0.0 tag is pushed.
 
-Then dispatch the first subagent for the next task. Do not ask permission to
-proceed task-by-task — the plan is your standing authorization. Pause only on:
-  • Level-1 review trigger (run reviewers, then continue)
-  • Phase Review Gate (run reviewers, await reconcile)
-  • Substantive disagreement with the plan (escalate to user)
-  • Open external-setup item (escalate to user)
+Do NOT ask the user "should I begin?", "ready to start?", "want me to
+proceed?", or any equivalent. Begin.
 ```
 
 ---

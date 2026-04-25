@@ -1,9 +1,11 @@
 """Entry point — starts the JSON-RPC server on stdin/stdout."""
+import os
 from typing import Any
 from khutbah_pipeline.rpc import RpcServer, register
 from khutbah_pipeline.ingest.local import probe_local
 from khutbah_pipeline.edit.proxy import generate_proxy
 from khutbah_pipeline.edit.smartcut import smart_cut
+from khutbah_pipeline.detect.pipeline import run_detection_pipeline
 
 @register("ping")
 def ping() -> dict[str, object]:
@@ -37,6 +39,20 @@ def _smart_cut(
         target_lra=target_lra,
     )
     return {"output": dst}
+
+@register("detect.run")
+def _detect(audio_path: str, model_dir: str = "") -> dict[str, Any]:
+    """Run the khutbah detection pipeline.
+
+    `model_dir` defaults to the bundled Whisper model path (relative to
+    python-pipeline/ cwd, or via KHUTBAH_MODEL_DIR env override).
+    """
+    if not model_dir:
+        model_dir = os.environ.get(
+            "KHUTBAH_MODEL_DIR",
+            "../resources/models/whisper-large-v3",
+        )
+    return run_detection_pipeline(audio_path, model_dir)
 
 if __name__ == "__main__":
     RpcServer().run_forever()

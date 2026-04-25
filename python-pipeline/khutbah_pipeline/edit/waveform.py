@@ -6,7 +6,9 @@ import numpy as np
 from khutbah_pipeline.util.ffmpeg import FFMPEG, ffprobe_json
 
 
-SAMPLE_RATE = 8000
+SAMPLE_RATE = 2000  # 2kHz captures up to 1kHz (Nyquist) — way more than the
+                    # ~50-150 Hz envelope needed for waveform visualisation,
+                    # but 4x faster to decode than 8kHz on a long source.
 EMIT_EVERY_N_BUCKETS = 30  # ~ 0.7s/30 min source — feels live without spamming
 
 

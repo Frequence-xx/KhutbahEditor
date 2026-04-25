@@ -30,7 +30,7 @@ def silent_clip(tmp_path: Path) -> Path:
 
 def test_compute_waveform_returns_normalised_peaks(silent_clip: Path) -> None:
     result = compute_waveform(str(silent_clip), peaks_count=30)
-    assert result["sample_rate"] == 8000
+    assert result["sample_rate"] == 2000
     assert 2.5 < result["duration"] < 3.5
     assert len(result["peaks"]) == 30
     assert all(0.0 <= p <= 1.0 for p in result["peaks"])

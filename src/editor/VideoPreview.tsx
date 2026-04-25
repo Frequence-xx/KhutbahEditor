@@ -1,4 +1,4 @@
-import { useRef, useEffect, forwardRef, useImperativeHandle } from 'react';
+import { useRef, useState, useEffect, forwardRef, useImperativeHandle } from 'react';
 
 export type VideoHandle = {
   play: () => void;
@@ -87,43 +87,90 @@ export const VideoPreview = forwardRef<VideoHandle, Props>(function VideoPreview
 
   // Preserve playback position across src swaps. The Editor swaps from the
   // raw source to the scrub-friendly proxy as soon as proxy gen finishes;
-  // without this the user gets jerked back to t=0 mid-scrub.
+  // without this the user gets jerked back to t=0 mid-scrub. We update
+  // lastTimeRef on every timeupdate AND every seek so a click-then-swap
+  // race always restores to the user's intended time, not whatever the
+  // last timeupdate happened to land on.
   const lastTimeRef = useRef<number>(0);
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
-    const onSeek = () => {
-      lastTimeRef.current = v.currentTime;
+    const sync = () => {
+      if (Number.isFinite(v.currentTime) && v.currentTime > 0) {
+        lastTimeRef.current = v.currentTime;
+      }
     };
-    v.addEventListener('timeupdate', onSeek);
-    return () => v.removeEventListener('timeupdate', onSeek);
+    v.addEventListener('timeupdate', sync);
+    v.addEventListener('seeked', sync);
+    v.addEventListener('seeking', sync);
+    return () => {
+      v.removeEventListener('timeupdate', sync);
+      v.removeEventListener('seeked', sync);
+      v.removeEventListener('seeking', sync);
+    };
   }, []);
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
-    // After the new src loads its metadata, restore the time we had before.
     const onMeta = () => {
       if (lastTimeRef.current > 0) {
         v.currentTime = Math.min(lastTimeRef.current, v.duration || lastTimeRef.current);
+        console.log('[video] restored time after src swap', {
+          restored: v.currentTime, src: v.currentSrc,
+        });
       }
     };
     v.addEventListener('loadedmetadata', onMeta);
     return () => v.removeEventListener('loadedmetadata', onMeta);
   }, [src]);
 
+  // Surface video-element errors to the console + UI. A broken proxy file
+  // (incomplete generation, missing keyframes) makes the video silently
+  // ignore seeks and revert to t=0 — exactly the "seek goes back to
+  // beginning" symptom. We log the MediaError code so we can tell whether
+  // it's a network/decode/source error vs. just slow buffering.
+  const [mediaError, setMediaError] = useState<string | null>(null);
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const onError = () => {
+      const err = v.error;
+      const msg = err
+        ? `code=${err.code} (${
+            err.code === 1 ? 'aborted'
+            : err.code === 2 ? 'network'
+            : err.code === 3 ? 'decode'
+            : err.code === 4 ? 'src not supported'
+            : 'unknown'
+          })`
+        : 'unknown';
+      console.error('[video] error', { msg, src: v.currentSrc });
+      setMediaError(msg);
+    };
+    v.addEventListener('error', onError);
+    return () => v.removeEventListener('error', onError);
+  }, [src]);
+  // Reset the error when src changes — the user may be retrying with a
+  // fresh proxy/source and we don't want a stale error sticking around.
+  useEffect(() => { setMediaError(null); }, [src]);
+
   return (
-    // 16:9 aspect tied to the column width so the preview grows when the
-    // user drags the resize handle to widen the player column. object-contain
-    // letterboxes/pillarboxes for non-16:9 sources rather than cropping —
-    // the right call for editing where frame accuracy matters.
     <div className="bg-black rounded-md relative border border-border-strong overflow-hidden w-full aspect-video">
       <video
         ref={videoRef}
         src={src}
         className="w-full h-full object-contain"
         controls
-        preload="metadata"
+        // preload="auto" makes the browser fetch enough buffer to seek
+        // accurately; the previous "metadata" was enough to render duration
+        // but caused later seeks to stall waiting for byte-range loads.
+        preload="auto"
       />
+      {mediaError && (
+        <div className="absolute bottom-2 left-2 right-2 px-2 py-1 bg-danger/90 text-white text-[10px] font-mono rounded">
+          Video error ({mediaError}) — try ↻ Rebuild preview
+        </div>
+      )}
     </div>
   );
 });

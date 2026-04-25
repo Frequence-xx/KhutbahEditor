@@ -256,17 +256,33 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
     if (!waveform) {
       setWaveformStatus('loading');
       (async () => {
+        // Two-pass waveform: a coarse 200-bucket pass lands in ~1-2s
+        // (tiny JSON, decode bottlenecked but bucketing is cheap), so the
+        // user sees a recognisable rough waveform almost immediately —
+        // Premiere/DaVinci-style "show me what I have, fill in detail
+        // later". Then the 1500-bucket pass replaces it with the high-res
+        // version.
         try {
-          const w = await window.khutbah!.pipeline.call<{ peaks: number[] }>(
+          const coarse = await window.khutbah!.pipeline.call<{ peaks: number[] }>(
+            'edit.waveform',
+            { src: project.sourcePath, peaks_count: 200 },
+          );
+          if (cancelled) return;
+          if (coarse.peaks.length > 0) setWaveform(coarse.peaks);
+        } catch (e) {
+          console.warn('[editor] coarse waveform failed:', e);
+        }
+        try {
+          const fine = await window.khutbah!.pipeline.call<{ peaks: number[] }>(
             'edit.waveform',
             { src: project.sourcePath, peaks_count: 1500 },
           );
           if (cancelled) return;
-          setWaveform(w.peaks);
+          setWaveform(fine.peaks);
           setWaveformStatus('idle');
         } catch (e: unknown) {
           if (cancelled) return;
-          console.warn('[editor] waveform fetch failed:', e);
+          console.warn('[editor] fine waveform failed:', e);
           setWaveformStatus('failed');
         }
       })();

@@ -49,3 +49,5 @@ playwright-report/
 .env
 .env.local
 assets/logo-base64.txt
+
+.claude/

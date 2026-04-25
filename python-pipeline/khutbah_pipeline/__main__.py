@@ -6,6 +6,7 @@ from khutbah_pipeline.align.crosscorr import align_files
 from khutbah_pipeline.ingest.local import probe_local
 from khutbah_pipeline.ingest.youtube import info_only, download
 from khutbah_pipeline.edit.proxy import generate_proxy
+from khutbah_pipeline.edit.mux import apply_offset_and_mux
 from khutbah_pipeline.edit.smartcut import smart_cut
 from khutbah_pipeline.edit.thumbnail import extract_candidates
 from khutbah_pipeline.detect.pipeline import run_detection_pipeline
@@ -28,6 +29,11 @@ def _align(video_path: str, audio_path: str) -> dict[str, Any]:
 @register("ingest.probe_local")
 def _probe(path: str) -> dict[str, Any]:
     return probe_local(path)
+
+@register("edit.apply_offset_mux")
+def _mux(video_path: str, audio_path: str, offset_seconds: float, dst: str) -> dict[str, str]:
+    apply_offset_and_mux(video_path, audio_path, offset_seconds, dst)
+    return {"path": dst}
 
 @register("edit.generate_proxy")
 def _proxy(src: str, dst: str) -> dict[str, str]:

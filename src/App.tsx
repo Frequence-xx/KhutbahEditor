@@ -105,6 +105,68 @@ export default function App() {
     }
   }
 
+  async function pickDualFileAndStart(): Promise<void> {
+    if (!window.khutbah) return;
+    try {
+      const videoPath = await window.khutbah.dialog.openVideo();
+      if (!videoPath) return;
+      const audioPath = await window.khutbah.dialog.openAudio();
+      if (!audioPath) return;
+
+      const dir = await window.khutbah.paths.defaultOutputDir();
+      await window.khutbah.paths.ensureDir(dir);
+
+      setAutoPilotProgress({ stage: 'detect', message: 'Aligning audio to video…' });
+      const align = await window.khutbah.pipeline.call<{ offset_seconds: number; confidence: number }>(
+        'align.dual_file',
+        { video_path: videoPath, audio_path: audioPath },
+      );
+
+      if (align.confidence < 5) {
+        const proceed = confirm(
+          `Alignment confidence is low (${align.confidence.toFixed(1)}). ` +
+          `KhutbahEditor will use offset ${align.offset_seconds.toFixed(2)}s but you may want to ` +
+          `manually verify in the editor. Continue?`,
+        );
+        if (!proceed) {
+          setAutoPilotProgress(null);
+          return;
+        }
+      }
+
+      setAutoPilotProgress({ stage: 'detect', message: 'Muxing aligned video…' });
+      const aligned = `${dir}/aligned-${Date.now()}.mp4`;
+      await window.khutbah.pipeline.call('edit.apply_offset_mux', {
+        video_path: videoPath,
+        audio_path: audioPath,
+        offset_seconds: align.offset_seconds,
+        dst: aligned,
+      });
+
+      const probe = await window.khutbah.pipeline.call<{ duration: number }>(
+        'ingest.probe_local',
+        { path: aligned },
+      );
+      setAutoPilotProgress(null);
+
+      const id = aligned.replace(/[^a-z0-9]/gi, '_').slice(-32);
+      addProject({
+        id,
+        sourcePath: aligned,
+        duration: probe.duration,
+        createdAt: Date.now(),
+        status: 'draft',
+      });
+      await maybeAutoPilot(id);
+    } catch (e: unknown) {
+      setAutoPilotProgress(null);
+      const msg = e && typeof e === 'object' && 'message' in e
+        ? String((e as { message: unknown }).message)
+        : String(e);
+      alert(`Dual-file processing failed: ${msg}`);
+    }
+  }
+
   async function pickAndCreate() {
     if (!window.khutbah) return;
     const path = await window.khutbah.dialog.openVideo();
@@ -149,6 +211,7 @@ export default function App() {
         <NewKhutbah
           onPickFile={pickAndCreate}
           onYoutubeUrl={startFromYoutube}
+          onPickDualFile={pickDualFileAndStart}
           onCancel={() => setScreen({ name: 'library' })}
         />
       )}

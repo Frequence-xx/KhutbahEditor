@@ -27,6 +27,15 @@ export function registerIpcHandlers(sidecar: SidecarManager): void {
     });
     return r.canceled ? null : r.filePaths[0];
   });
+  ipcMain.handle('dialog:openAudio', async () => {
+    const r = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      filters: [
+        { name: 'Audio', extensions: ['wav', 'mp3', 'm4a', 'aac', 'flac', 'ogg', 'opus'] },
+      ],
+    });
+    return r.canceled ? null : r.filePaths[0];
+  });
   ipcMain.handle('paths:defaultOutputDir', () => {
     const home = os.homedir();
     const today = new Date().toISOString().slice(0, 10);

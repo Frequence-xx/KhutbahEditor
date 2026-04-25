@@ -6,10 +6,11 @@ type Tab = 'youtube' | 'local' | 'dual';
 type Props = {
   onPickFile: () => void;
   onYoutubeUrl: (url: string) => void;
+  onPickDualFile: () => void;
   onCancel: () => void;
 };
 
-export function NewKhutbah({ onPickFile, onYoutubeUrl, onCancel }: Props) {
+export function NewKhutbah({ onPickFile, onYoutubeUrl, onPickDualFile, onCancel }: Props) {
   const [tab, setTab] = useState<Tab>('youtube');
   const [url, setUrl] = useState<string>('');
   const valid = /^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\//.test(url);
@@ -24,14 +25,13 @@ export function NewKhutbah({ onPickFile, onYoutubeUrl, onCancel }: Props) {
             <button
               key={t}
               onClick={() => setTab(t)}
-              disabled={t === 'dual'}
               className={`flex-1 px-4 py-2 rounded-md text-sm font-semibold ${
                 tab === t
                   ? 'bg-amber/15 text-amber border border-amber'
-                  : 'bg-bg-3 text-text-muted border border-border-strong hover:text-text disabled:opacity-50'
+                  : 'bg-bg-3 text-text-muted border border-border-strong hover:text-text'
               }`}
             >
-              {t === 'youtube' ? 'YouTube URL' : t === 'local' ? 'Local file' : 'Dual file (Phase 4)'}
+              {t === 'youtube' ? 'YouTube URL' : t === 'local' ? 'Local file' : 'Dual file'}
             </button>
           ))}
         </div>
@@ -53,6 +53,17 @@ export function NewKhutbah({ onPickFile, onYoutubeUrl, onCancel }: Props) {
           <Button variant="primary" onClick={onPickFile}>
             Pick local file…
           </Button>
+        )}
+        {tab === 'dual' && (
+          <div className="space-y-3">
+            <p className="text-text-muted text-sm">
+              Use this when you have a separate audio recording (e.g., lapel mic) alongside camera video.
+              KhutbahEditor will FFT-align the audio to the camera and mux them before processing.
+            </p>
+            <Button variant="primary" onClick={onPickDualFile}>
+              Pick video + audio…
+            </Button>
+          </div>
         )}
         <div className="mt-8 flex justify-end">
           <Button variant="ghost" onClick={onCancel}>Cancel</Button>

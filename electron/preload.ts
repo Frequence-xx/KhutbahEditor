@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('khutbah', {
   },
   dialog: {
     openVideo: () => ipcRenderer.invoke('dialog:openVideo') as Promise<string | null>,
+    openAudio: () => ipcRenderer.invoke('dialog:openAudio') as Promise<string | null>,
   },
   paths: {
     defaultOutputDir: () => ipcRenderer.invoke('paths:defaultOutputDir') as Promise<string>,

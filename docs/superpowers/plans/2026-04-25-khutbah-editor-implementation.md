@@ -155,6 +155,26 @@ Engineer must have installed locally before starting:
 
 Goal: a "Hello, KhutbahEditor" app that runs `npm run dev` on Mac/Windows/Linux, shows the brand-correct title bar with logo and Cinzel wordmark, has a working Python sidecar reachable via JSON-RPC, and produces unsigned dev builds via `npm run build`. CI runs on every push.
 
+### Task 0.0: Read project rules before any code
+
+**Files:**
+- Read: `CLAUDE.md` (anti-sycophancy + dev workflow + commands)
+- Read: `AGENTS.md` (reviewer persona + test policy + 3-level review pipeline)
+- Read: `docs/superpowers/specs/2026-04-25-khutbah-editor-design.md` (locked design)
+
+- [ ] **Step 1: Confirm both rule docs exist at the repo root**
+
+```bash
+ls CLAUDE.md AGENTS.md docs/superpowers/specs/*.md docs/superpowers/plans/*.md
+```
+Expected: all four files present.
+
+- [ ] **Step 2: Read CLAUDE.md fully — adhere to its anti-sycophancy rules from Task 0.1 onward**
+
+- [ ] **Step 3: Read AGENTS.md fully — note the three review levels (per-task, per-phase, pre-release) you'll be invoking**
+
+No commit — these files were committed when the plan was committed.
+
 ### Task 0.1: Initialize Node project
 
 **Files:**
@@ -1321,12 +1341,31 @@ git add electron-builder.json build/
 git commit -m "feat(build): electron-builder config for mac/win/linux"
 ```
 
-### Task 0.11: GitHub Actions CI matrix
+### Task 0.11: GitHub Actions CI matrix (with artifact upload + integration split)
 
 **Files:**
 - Create: `.github/workflows/build.yml`
+- Create: `python-pipeline/pytest.ini` (pytest timeout config)
 
-- [ ] **Step 1: Create CI workflow**
+- [ ] **Step 1: Create pytest.ini for per-test timeout**
+
+```ini
+# python-pipeline/pytest.ini
+[pytest]
+timeout = 30
+markers =
+    integration: tests requiring real FFmpeg + Whisper model + large fixtures (run on workflow_dispatch + nightly only)
+addopts = -v --tb=short --strict-markers
+```
+
+Install the timeout plugin:
+```bash
+cd python-pipeline && source .venv/bin/activate && pip install pytest-timeout
+```
+
+Add `pytest-timeout>=2.3` to `pyproject.toml` `[project.optional-dependencies] dev`.
+
+- [ ] **Step 2: Create CI workflow with three jobs (unit, integration, package)**
 
 ```yaml
 # .github/workflows/build.yml
@@ -1334,15 +1373,19 @@ name: Build
 on:
   push: { branches: [main] }
   pull_request: { branches: [main] }
-  workflow_dispatch:
+  workflow_dispatch:                           # manual trigger for integration tests
+  schedule:
+    - cron: '0 2 * * *'                        # nightly integration run at 02:00 UTC
   release: { types: [created] }
 
 jobs:
-  test:
+  unit-tests:
+    name: Unit tests (${{ matrix.os }})
     strategy:
       matrix:
         os: [macos-14, windows-2022, ubuntu-22.04]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 8                          # 300s shell timeout × 2 layers + buffer
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -1353,21 +1396,64 @@ jobs:
         run: npm ci
       - name: Install Python pipeline (dev)
         working-directory: python-pipeline
+        shell: bash
         run: |
           python -m venv .venv
-          ${{ runner.os == 'Windows' && '.venv\Scripts\activate' || 'source .venv/bin/activate' }}
+          if [ "${{ runner.os }}" = "Windows" ]; then source .venv/Scripts/activate; else source .venv/bin/activate; fi
           pip install -e ".[dev]"
+      - name: Lint (ESLint)
+        run: timeout 60 npm run lint
+      - name: TypeScript tests (Vitest, unit only, 300s wrapper)
+        run: timeout 300 npm test
+      - name: Python tests (Pytest, unit only — exclude @pytest.mark.integration, 300s wrapper)
+        working-directory: python-pipeline
         shell: bash
-      - name: Lint
-        run: npm run lint
-      - name: TypeScript tests
-        run: npm test
-      - name: Python tests
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then source .venv/Scripts/activate; else source .venv/bin/activate; fi
+          timeout 300 pytest -m "not integration"
+      - name: Upload test artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-${{ matrix.os }}
+          path: |
+            tests/reports/
+            python-pipeline/tests/reports/
+            playwright-report/
+          retention-days: 14
+
+  integration-tests:
+    name: Integration tests (Linux only, on-demand + nightly)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30                         # Whisper model download + inference
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: npm ci
+      - name: Install Python pipeline (dev)
         working-directory: python-pipeline
         run: |
-          ${{ runner.os == 'Windows' && '.venv\Scripts\activate' || 'source .venv/bin/activate' }}
-          pytest -v
-        shell: bash
+          python -m venv .venv
+          source .venv/bin/activate
+          pip install -e ".[dev]"
+      - name: Fetch resources (FFmpeg + yt-dlp + Whisper model)
+        run: bash resources/fetch-resources.sh Linux x64
+      - name: Run integration tests (real FFmpeg + Whisper)
+        working-directory: python-pipeline
+        run: |
+          source .venv/bin/activate
+          timeout 1500 pytest -m integration
+      - name: Upload integration artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-reports
+          path: python-pipeline/tests/reports/
+          retention-days: 14
 
   package:
     needs: test
@@ -1581,6 +1667,37 @@ Follow the implementation plan at `docs/superpowers/plans/2026-04-25-khutbah-edi
 git add README.md docs/CONTRIBUTING.md docs/INSTALL.md
 git commit -m "docs: README + CONTRIBUTING for Phase 0 onboarding"
 ```
+
+### Task 0.14: Phase 0 Review Gate (MANDATORY before Phase 1)
+
+Per AGENTS.md §"Code Review Pipeline" Level 2, run two-reviewer cross-model review of Phase 0.
+
+- [ ] **Step 1: Capture Phase 0 commit range**
+
+```bash
+PHASE_START=$(git rev-list --max-parents=0 HEAD)   # root commit
+git log --oneline "$PHASE_START..HEAD"
+git diff --stat "$PHASE_START..HEAD"
+```
+
+- [ ] **Step 2: Reviewer A — Claude (`superpowers:code-reviewer`)**
+
+Invoke via the Skill tool with the prompt template in AGENTS.md §"Level 2". Phase scope: *"Electron + Vite + React + TypeScript + Tailwind + Python sidecar skeleton with brand-aligned UI; cross-platform packaging config; CI matrix; first dev build runs."*
+
+- [ ] **Step 3: Reviewer B — Codex GPT (`codex`, mode `review`)**
+
+Invoke via the Skill tool, mode `review`, same diff range, same standards. Surface any disagreements with Reviewer A.
+
+- [ ] **Step 4: Reconcile**
+
+- Both APPROVE → tag and proceed:
+  ```bash
+  git tag phase-0-complete
+  ```
+- Either REQUEST_CHANGES / REJECT → address every major issue, re-run both reviewers
+- Disagreement on severity → take the stricter view, document the call in a follow-up commit (`docs(review): phase-0 reconciliation note`)
+
+- [ ] **Step 5: No further commits in Phase 0 after the tag**
 
 ---
 
@@ -2745,6 +2862,34 @@ git add electron/store.ts electron/ipc/ electron/preload.ts src/screens/Settings
 git commit -m "feat(settings): persistent settings store + Settings screen"
 ```
 
+### Task 1.10: Phase 1 Review Gate (MANDATORY before Phase 2)
+
+Two-reviewer cross-model review of Phase 1 per AGENTS.md §"Code Review Pipeline" Level 2.
+
+- [ ] **Step 1: Capture diff**
+
+```bash
+git log --oneline phase-0-complete..HEAD
+git diff --stat phase-0-complete..HEAD
+```
+
+- [ ] **Step 2: Reviewer A — `superpowers:code-reviewer`**
+
+Phase scope: *"Local file ingest, preview proxy generation, draggable timeline markers, two-pass EBU R128 normalization, smart-cut export, Settings persistence — fully manual editor end-to-end."*
+
+- [ ] **Step 3: Reviewer B — `codex` (mode `review`)**
+
+Same diff, same standards, same prompt structure.
+
+- [ ] **Step 4: Reconcile + tag**
+
+```bash
+# After both APPROVE
+git tag phase-1-complete
+```
+
+If either reviewer flags FFmpeg argument construction issues, audio sync drift in `smart_cut`, or non-deterministic test data: address before tagging.
+
 ---
 
 # PHASE 2 — AUTO-DETECTION (~1.5 weeks)
@@ -3527,6 +3672,47 @@ git add src/
 git commit -m "feat(editor): per-part confidence + transcript snippet UI"
 ```
 
+### Task 2.9: Phase 2 Review Gate (MANDATORY before Phase 3)
+
+Two-reviewer cross-model review of Phase 2 per AGENTS.md §"Code Review Pipeline" Level 2.
+
+- [ ] **Step 1: Capture diff**
+
+```bash
+git log --oneline phase-1-complete..HEAD
+git diff --stat phase-1-complete..HEAD
+```
+
+- [ ] **Step 2: Reviewer A — `superpowers:code-reviewer`**
+
+Phase scope: *"Bundled Whisper large-v3 + multilingual detection pipeline (AR/NL/EN), Arabic text normalization, opening/closing phrase library, silence detection, confidence scoring, Editor pre-fill from auto-detection."*
+
+Particular focus: correctness of Arabic normalization (diacritics, alef forms), phrase-matching boundaries, fallback behavior when opening/closing not found.
+
+- [ ] **Step 3: Reviewer B — `codex` (mode `review`)**
+
+Same diff, same standards.
+
+- [ ] **Step 4: Manual integration check + tag**
+
+Run the canonical test khutbah end-to-end:
+```bash
+yt-dlp -f mp4 https://www.youtube.com/watch?v=whrEDiKurFU -o /tmp/test-khutbah.mp4
+cd python-pipeline && source .venv/bin/activate
+python -c "
+from khutbah_pipeline.detect.pipeline import run_detection_pipeline
+result = run_detection_pipeline('/tmp/test-khutbah.mp4', '../resources/models/whisper-large-v3')
+print(f'p1: {result[\"part1\"][\"start\"]:.1f}-{result[\"part1\"][\"end\"]:.1f} (conf={result[\"part1\"][\"confidence\"]:.2f})')
+print(f'p2: {result[\"part2\"][\"start\"]:.1f}-{result[\"part2\"][\"end\"]:.1f} (conf={result[\"part2\"][\"confidence\"]:.2f})')
+print(f'overall: {result[\"overall_confidence\"]:.2f}, lang: {result[\"lang_dominant\"]}')"
+```
+
+Expected: both parts detected with confidence > 0.7. If lower, dig into transcript quality before tagging.
+
+```bash
+git tag phase-2-complete
+```
+
 ---
 
 # PHASE 3 — YOUTUBE INGEST + UPLOAD (~1 week)
@@ -4278,6 +4464,42 @@ git add src/
 git commit -m "feat(upload): UI with metadata, thumbnail picker, and per-part resumable upload"
 ```
 
+### Task 3.8: Phase 3 Review Gate (MANDATORY before Phase 4)
+
+Two-reviewer cross-model review of Phase 3 per AGENTS.md §"Code Review Pipeline" Level 2.
+
+This phase touches **two security-sensitive surfaces** (OAuth flow, YouTube API client). Both reviewers must specifically address:
+
+- OAuth loopback redirect security (port binding to 127.0.0.1 only, PKCE verifier handling, state parameter)
+- Refresh-token storage in keychain (no logging, no plain-text fallback)
+- YouTube API error handling matrix (401 refresh, 403 quota, 5xx backoff)
+- yt-dlp argument escaping (URL is user input — must not allow injection)
+
+- [ ] **Step 1: Capture diff**
+
+```bash
+git log --oneline phase-2-complete..HEAD
+git diff --stat phase-2-complete..HEAD
+```
+
+- [ ] **Step 2: Reviewer A — `superpowers:code-reviewer`**
+
+Phase scope: *"yt-dlp YouTube ingest, OAuth loopback flow with PKCE, keytar refresh-token storage, resumable YouTube upload, scene-extraction thumbnails, full Upload screen with metadata templates."*
+
+- [ ] **Step 3: Reviewer B — `codex` (mode `review`)**
+
+Same diff, same standards. Particularly value Codex's perspective on the OAuth state machine.
+
+- [ ] **Step 4: Codex adversarial pass (`codex` mode `challenge`)**
+
+Run an adversarial pass specifically against `electron/auth/youtube-oauth.ts` and `python-pipeline/khutbah_pipeline/upload/`. Treat any successful break as blocking.
+
+- [ ] **Step 5: Reconcile + tag**
+
+```bash
+git tag phase-3-complete
+```
+
 ---
 
 # PHASE 4 — AUTO-PILOT + DUAL-FILE + SETTINGS POLISH (~1 week)
@@ -4570,6 +4792,41 @@ git add electron/ src/ python-pipeline/
 git commit -m "feat(align): dual-file mode UI + automatic alignment + mux"
 ```
 
+### Task 4.5: Phase 4 Review Gate (MANDATORY before Phase 5)
+
+Two-reviewer cross-model review of Phase 4 per AGENTS.md §"Code Review Pipeline" Level 2.
+
+- [ ] **Step 1: Capture diff**
+
+```bash
+git log --oneline phase-3-complete..HEAD
+git diff --stat phase-3-complete..HEAD
+```
+
+- [ ] **Step 2: Reviewer A — `superpowers:code-reviewer`**
+
+Phase scope: *"Auto-pilot end-to-end orchestrator (URL/file → notification with YouTube links), OS-native completion notifications, FFT cross-correlation alignment for dual-file mode, Settings polish."*
+
+Particular focus: race conditions in the auto-pilot orchestrator, FFT correlation correctness, error propagation when auto-pilot encounters partial failures (export succeeded but upload failed, etc.).
+
+- [ ] **Step 3: Reviewer B — `codex` (mode `review`)**
+
+Same diff, same standards.
+
+- [ ] **Step 4: Manual smoke test of auto-pilot end-to-end**
+
+```bash
+# Sign in to a test YouTube account, paste the canonical test khutbah URL,
+# click Start, walk away, confirm desktop notification fires with YouTube links
+# Check: both videos exist on YouTube, correct visibility, correct titles, correct thumbnails
+```
+
+- [ ] **Step 5: Reconcile + tag**
+
+```bash
+git tag phase-4-complete
+```
+
 ---
 
 # PHASE 5 — CROSS-PLATFORM BUILDS, POLISH, SHIP (~1 week)
@@ -4829,11 +5086,53 @@ Watch GitHub Actions: confirm matrix builds pass, artifacts upload to a test rel
 
 - [ ] **Step 4: No code commit needed if everything passes — verification step.**
 
-### Task 5.5: Tag v1.0.0 release
+### Task 5.5: Phase 5 + Pre-release review gate (Level 3)
+
+This is the **most rigorous** gate — six checks, all must pass before tagging v1.0.0. Per AGENTS.md §"Level 3 — Pre-release review".
+
+- [ ] **Step 1: Capture release diff**
+
+```bash
+git log --oneline phase-4-complete..HEAD
+git diff --stat phase-4-complete..HEAD
+# For full release diff (after first release: vN-1..HEAD)
+```
+
+- [ ] **Step 2: Reviewer A — `superpowers:code-reviewer`** against the full Phase 5 diff
+
+Phase scope: *"First-run welcome screen, electron-updater integration, full documentation set (INSTALL/USAGE/PRIVACY/README), cross-platform build verification."*
+
+- [ ] **Step 3: Reviewer B — `codex` (mode `review`)** against the same diff
+
+- [ ] **Step 4: Adversarial pass — `codex` (mode `challenge`)**
+
+Try to break: OAuth flow, file path handling, IPC argument validation, FFmpeg command construction, AppImage / .dmg / .exe extraction. Any successful break is a release blocker.
+
+- [ ] **Step 5: `security-review` skill**
+
+Run against the full release diff. Particular focus on:
+- OAuth: token storage, scope minimization, redirect-URI validation
+- IPC: every `ipcMain.handle` validates inputs from the renderer
+- FFmpeg: argument escaping (yt-dlp URL is user input)
+- File paths: no path traversal in output dir construction
+
+- [ ] **Step 6: Flakiness gate — full suite × 3 consecutive runs**
+
+```bash
+for i in 1 2 3; do
+  echo "=== Run $i ==="
+  npm test || exit 1
+  cd python-pipeline && timeout 300 pytest -m "not integration" || exit 1
+  cd ..
+done
+echo "✓ Three consecutive passes — flakiness gate cleared"
+```
+
+### Task 5.6: Tag v1.0.0 release
 
 **Files:** none — release tag.
 
-- [ ] **Step 1: Final QA on the test khutbah**
+- [ ] **Step 1: Final manual QA on the canonical test khutbah**
 
 ```bash
 # Open KhutbahEditor (any platform), paste https://www.youtube.com/watch?v=whrEDiKurFU
@@ -4897,7 +5196,8 @@ KhutbahEditor-1.0.0-linux-x64.deb
 
 - **No live OAuth integration test** in CI — would require a test Google account with OAuth client. Manual verification flagged in Task 3.4.
 - **No live YouTube upload integration test** in CI — same reason, plus quota cost. Manual verification flagged in Task 3.7 and Task 5.5.
-- **Whisper model verification on the actual test khutbah** is manual (Task 2.7 step 3, Task 5.5 step 1) — running large-v3 in CI would balloon CI time.
+- **Whisper model verification on the actual test khutbah** is manual (Task 2.7 step 3, Task 2.9 step 4, Task 5.6 step 1) — running large-v3 in CI would balloon CI time.
 - **Code signing** intentionally absent (per spec §8.3, §11).
+- **Phase review gates** (Tasks 0.14, 1.10, 2.9, 3.8, 4.5) are mandatory two-reviewer cross-model checks per AGENTS.md §"Code Review Pipeline" — they are the structural backbone of code quality on this project.
 
 These manual-verification gates are appropriate for a Phase 5 release process; automating them is a future hardening task.

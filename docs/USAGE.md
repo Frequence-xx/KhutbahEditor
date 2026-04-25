@@ -21,7 +21,15 @@ For each khutbah:
 
 ## Multi-account uploads
 
-Add multiple YouTube channels in **Settings → Accounts → + Add account**. Auto-pilot uploads to every channel marked "auto-publish" simultaneously, with per-channel metadata templates if you've configured overrides.
+Auto-pilot supports multi-account uploads — sign in with multiple YouTube channels (each new sign-in adds an account record), and auto-pilot will publish both parts to every account marked `autoPublish: true`.
+
+For v1, the multi-account UI in Settings is simplified:
+- The Welcome / Sign-in flow adds the first account with `autoPublish: true`.
+- Subsequent accounts (added by signing in again with a different Google account) start with `autoPublish: false`.
+- To toggle auto-publish per account, edit `~/.config/KhutbahEditor/youtube-accounts.json` directly.
+- The manual Upload screen uploads to the first signed-in account only.
+
+A Settings → Accounts UI panel with per-account configuration (auto-publish toggles, default playlists, metadata template overrides) ships in v1.1.
 
 ## Manual review
 

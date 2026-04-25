@@ -15,7 +15,7 @@ v1.0.0 — first stable release. Cross-platform (macOS, Windows, Linux), unsigne
 
 - **Auto-pilot**: paste YouTube URL or pick local file → walk away → both parts published to YouTube with thumbnails, metadata, and notifications when complete
 - **Multilingual**: Arabic / Dutch / English detection via bundled Whisper large-v3 (offline, no API calls)
-- **Multi-account**: configure N YouTube channels per install; auto-pilot uploads to every "auto-publish" account
+- **Multi-account auto-pilot**: configure N YouTube channels per install; auto-pilot uploads to every account marked auto-publish (Settings UI for per-account configuration coming in v1.1; current configuration via JSON edit)
 - **Audio normalization**: EBU R128 / -14 LUFS for YouTube standard
 - **Dual-file mode**: FFT-align separate audio/video tracks (lapel mic + camera) before processing
 - **Privacy-first**: all media stays on your machine. Only YouTube uploads + OAuth go to the network.

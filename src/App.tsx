@@ -10,7 +10,7 @@ export default function App() {
           {data?.ok ? `● Pipeline v${data.version}` : error ? '✕ Pipeline error' : '… connecting'}
         </span>
       } />
-      <main className="flex-1 flex items-center justify-center font-arabic text-3xl text-amber" dir="rtl">
+      <main className="flex-1 flex items-center justify-center font-arabic text-3xl text-amber" dir="rtl" lang="ar">
         السلام عليكم ورحمة الله
       </main>
     </div>

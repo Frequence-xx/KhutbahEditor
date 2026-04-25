@@ -1,0 +1,38 @@
+# Brainstorm session artifacts (kept locally, not tracked)
+.superpowers/
+
+# Node
+node_modules/
+dist/
+dist-electron/
+dist-web/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Build artifacts
+build/
+out/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Bundled binaries (large, fetched in Phase 0 setup)
+resources/bin/
+resources/models/
+
+# Logs
+*.log
+
+# Local env
+.env
+.env.local
+assets/logo-base64.txt

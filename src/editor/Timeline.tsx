@@ -1,5 +1,8 @@
 import { useRef, useEffect, useState, MouseEvent } from 'react';
 import { useMarkers, MarkerKey } from './markersStore';
+import { toKhutbahFileUrl } from '../lib/fileUrl';
+
+type Thumb = { index: number; time: number; path: string };
 
 type Props = {
   currentTime: number;
@@ -10,6 +13,7 @@ type Props = {
   waveform?: number[] | null;
   waveformStatus?: 'idle' | 'loading' | 'failed';
   onRetryWaveform?: () => void;
+  thumbs?: Thumb[];
 };
 
 const COLORS: Record<MarkerKey, string> = {
@@ -44,6 +48,7 @@ export function Timeline({
   waveform,
   waveformStatus = 'idle',
   onRetryWaveform,
+  thumbs = [],
 }: Props) {
   const { markers, duration, setMarker } = useMarkers();
   const trackRef = useRef<HTMLDivElement>(null);
@@ -303,11 +308,33 @@ export function Timeline({
               </div>
             ))}
           </div>
-          {/* Segments lane — Part 1 / Part 2 boxes + draggable markers. */}
+          {/* Segments lane — filmstrip background + Part 1/2 boxes + markers. */}
           <div
-            className="relative bg-bg-1 border-x border-b border-border-strong"
+            className="relative bg-bg-1 border-x border-b border-border-strong overflow-hidden"
             style={{ height: `${44 * vZoom}px` }}
           >
+            {/* Video filmstrip — fills in left-to-right as the sidecar
+                extracts thumbs. Each thumb is anchored at its real
+                timestamp; the renderer sizes them to (duration / count)
+                so the strip is gap-free at zoom=1. Higher zoom levels
+                spread thumbs further apart, which is correct — you're
+                viewing more pixels per second of source. */}
+            {thumbs.length > 0 && duration > 0 && (() => {
+              const slotWidthPct = 100 / thumbs.length;
+              return thumbs.map((thumb) => (
+                <img
+                  key={thumb.path}
+                  src={toKhutbahFileUrl(thumb.path)}
+                  alt=""
+                  draggable={false}
+                  className="absolute top-0 h-full pointer-events-none object-cover opacity-80"
+                  style={{
+                    left: `${pctOf(thumb.time) - slotWidthPct / 2}%`,
+                    width: `${slotWidthPct}%`,
+                  }}
+                />
+              ));
+            })()}
             {ticks.map((t) => (
               <div
                 key={`seg-tick-${t}`}

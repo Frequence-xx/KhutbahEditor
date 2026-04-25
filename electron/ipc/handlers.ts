@@ -69,6 +69,15 @@ export function registerIpcHandlers(sidecar: SidecarManager): void {
     const base = process.platform === 'darwin' ? 'Movies' : 'Videos';
     return path.join(home, base, 'KhutbahEditor', today);
   });
+  ipcMain.handle('paths:projectCacheDir', async (_e, projectId: string) => {
+    // Per-project cache for derived assets that aren't worth backing up
+    // (filmstrip thumbnails, scratch files). Lives under Electron's
+    // userData so it gets cleaned with the rest of app state.
+    const { app } = await import('electron');
+    const dir = path.join(app.getPath('userData'), 'project-cache', projectId);
+    await fs.mkdir(dir, { recursive: true });
+    return dir;
+  });
   ipcMain.handle('paths:ensureDir', async (_e, dir: string) => {
     await fs.mkdir(dir, { recursive: true });
     return dir;

@@ -25,6 +25,7 @@ declare global {
       paths: {
         defaultOutputDir: () => Promise<string>;
         ensureDir: (dir: string) => Promise<string>;
+        projectCacheDir: (projectId: string) => Promise<string>;
       };
       settings: {
         get: () => Promise<AppSettings>;

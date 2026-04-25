@@ -7,6 +7,7 @@ from khutbah_pipeline.ingest.local import probe_local
 from khutbah_pipeline.ingest.youtube import info_only, download
 from khutbah_pipeline.edit.proxy import generate_proxy
 from khutbah_pipeline.edit.waveform import compute_waveform
+from khutbah_pipeline.edit.filmstrip import extract_filmstrip
 from khutbah_pipeline.edit.mux import apply_offset_and_mux
 from khutbah_pipeline.edit.smartcut import smart_cut
 from khutbah_pipeline.edit.thumbnail import extract_candidates
@@ -43,6 +44,19 @@ def _waveform(
     notify: Optional[Callable[[dict[str, Any]], None]] = None,
 ) -> dict[str, Any]:
     return compute_waveform(src, peaks_count=peaks_count, progress_cb=notify)
+
+
+@register("edit.filmstrip")
+def _filmstrip(
+    src: str,
+    output_dir: str,
+    count: int = 30,
+    width: int = 160,
+    notify: Optional[Callable[[dict[str, Any]], None]] = None,
+) -> dict[str, Any]:
+    return extract_filmstrip(
+        src, output_dir, count=count, width=width, progress_cb=notify,
+    )
 
 
 @register("edit.generate_proxy")

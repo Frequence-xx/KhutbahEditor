@@ -59,6 +59,7 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
   const [detectionError, setDetectionError] = useState<string | null>(null);
   const [waveform, setWaveform] = useState<number[] | null>(null);
   const [waveformStatus, setWaveformStatus] = useState<'idle' | 'loading' | 'failed'>('idle');
+  const [thumbs, setThumbs] = useState<{ index: number; time: number; path: string }[]>([]);
   const settings = useSettings((s) => s.settings);
   const loadSettings = useSettings((s) => s.load);
 
@@ -233,41 +234,73 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
     return () => window.clearInterval(id);
   }, [detectStartedAt]);
 
-  // Stream-decode the waveform. The sidecar emits stage='waveform' events
-  // every ~30 buckets with the partial peaks array, so the audio lane fills
-  // in progressively (Premiere/DaVinci-style) instead of staring at an
-  // empty lane while a 1h source decodes for 8-15 seconds.
+  // Stream-decode the waveform AND the video filmstrip in parallel. Both
+  // emit progress events with partial payloads so the timeline fills in
+  // left-to-right while decoding continues — Premiere/DaVinci-style instant
+  // visual feedback instead of a blank lane during the 5-15s decode.
   useEffect(() => {
-    if (!project || !window.khutbah || waveform) return;
+    if (!project || !window.khutbah) return;
     let cancelled = false;
-    setWaveformStatus('loading');
+
     const unsubscribe = window.khutbah.pipeline.onProgress((params) => {
-      if (cancelled || params.stage !== 'waveform') return;
-      const peaks = (params as { peaks?: number[] }).peaks;
-      if (Array.isArray(peaks) && peaks.length > 0) {
-        setWaveform(peaks);
+      if (cancelled) return;
+      if (params.stage === 'waveform') {
+        const peaks = (params as { peaks?: number[] }).peaks;
+        if (Array.isArray(peaks) && peaks.length > 0) setWaveform(peaks);
+      } else if (params.stage === 'filmstrip') {
+        const t = (params as { thumbs?: { index: number; time: number; path: string }[] }).thumbs;
+        if (Array.isArray(t)) setThumbs(t);
       }
     });
-    (async () => {
-      try {
-        const w = await window.khutbah!.pipeline.call<{ peaks: number[] }>(
-          'edit.waveform',
-          { src: project.sourcePath, peaks_count: 1500 },
-        );
-        if (cancelled) return;
-        setWaveform(w.peaks);
-        setWaveformStatus('idle');
-      } catch (e: unknown) {
-        if (cancelled) return;
-        console.warn('[editor] waveform fetch failed:', e);
-        setWaveformStatus('failed');
-      }
-    })();
+
+    if (!waveform) {
+      setWaveformStatus('loading');
+      (async () => {
+        try {
+          const w = await window.khutbah!.pipeline.call<{ peaks: number[] }>(
+            'edit.waveform',
+            { src: project.sourcePath, peaks_count: 1500 },
+          );
+          if (cancelled) return;
+          setWaveform(w.peaks);
+          setWaveformStatus('idle');
+        } catch (e: unknown) {
+          if (cancelled) return;
+          console.warn('[editor] waveform fetch failed:', e);
+          setWaveformStatus('failed');
+        }
+      })();
+    }
+
+    if (thumbs.length === 0) {
+      (async () => {
+        try {
+          const cacheDir = await window.khutbah!.paths.projectCacheDir(project.id);
+          const result = await window.khutbah!.pipeline.call<{
+            thumbs: { index: number; time: number; path: string }[];
+          }>('edit.filmstrip', {
+            src: project.sourcePath,
+            output_dir: `${cacheDir}/thumbs`,
+            count: 30,
+            width: 160,
+          });
+          if (cancelled) return;
+          setThumbs(result.thumbs);
+        } catch (e: unknown) {
+          if (cancelled) return;
+          console.warn('[editor] filmstrip extract failed:', e);
+        }
+      })();
+    }
+
     return () => {
       cancelled = true;
       unsubscribe();
     };
-  }, [project?.sourcePath, waveform]);
+    // We intentionally only re-run on sourcePath change; waveform/thumbs in
+    // the deps would cause the effect to re-subscribe on every progress tick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project?.sourcePath, project?.id]);
 
   function regenerateProxy(): void {
     if (!project) return;
@@ -607,6 +640,7 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
           setWaveform(null);
           setWaveformStatus('idle');
         }}
+        thumbs={thumbs}
       />
       <div className="px-6 py-3 border-t border-border-strong flex items-center gap-3">
         {exportError && <span className="text-danger text-xs">{exportError}</span>}

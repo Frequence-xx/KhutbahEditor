@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('khutbah', {
   paths: {
     defaultOutputDir: () => ipcRenderer.invoke('paths:defaultOutputDir') as Promise<string>,
     ensureDir: (dir: string) => ipcRenderer.invoke('paths:ensureDir', dir) as Promise<string>,
+    projectCacheDir: (projectId: string) =>
+      ipcRenderer.invoke('paths:projectCacheDir', projectId) as Promise<string>,
   },
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),

@@ -1,13 +1,19 @@
 from typing import Any, Callable, Optional
 from khutbah_pipeline.detect.transcribe import transcribe_multilingual
 from khutbah_pipeline.detect.silence import detect_silences
-from khutbah_pipeline.detect.phrases import find_first_opening, find_last_closing
+from khutbah_pipeline.detect.phrases import (
+    find_first_opening,
+    find_first_adhan_end,
+    find_last_closing,
+)
 
 
 OPENING_BUFFER = 5.0
+ADHAN_END_BUFFER = 3.0       # 3s pause typically separates adhan-end from khutbah-start
 DUA_END_BUFFER = 1.0
 MIN_PART1_DURATION = 300.0   # 5 min — silences within this window aren't the sitting silence
 END_GUARD_SECONDS = 300.0    # 5 min from end — silences past this aren't the sitting silence
+ADHAN_FALLBACK_CONFIDENCE = 0.55  # capped — caller should manual-verify when this fires
 
 
 # Indirection so tests can monkeypatch
@@ -41,21 +47,38 @@ def run_detection_pipeline(
     if progress_cb:
         progress_cb({"stage": "detect_boundaries", "message": "Locating khutbah opening phrase…", "progress": 0.7})
 
-    # Stage 3: opening (إن الحمد لله — always Arabic)
+    # Stage 3a: opening phrase (إن الحمد لله — always Arabic)
     opening = find_first_opening(words)
-    if opening is None:
+    anchor_kind = "opening"
+    anchor: Optional[dict[str, Any]] = opening
+
+    # Stage 3b fallback: adhan end (الله أكبر … لا إله إلا الله) — for the rare
+    # case the khateeb skips the standard opening. The adhan immediately
+    # precedes the khutbah, so its end is a usable Part 1 anchor with reduced
+    # confidence so the renderer prompts the user to verify.
+    if anchor is None:
+        anchor = find_first_adhan_end(words)
+        anchor_kind = "adhan_end"
+
+    if anchor is None:
         return {"error": "opening_not_found", "duration": duration, "words": words}
 
-    part1_start = max(0.0, opening["start_time"] - OPENING_BUFFER)
-    n_opening_words = max(1, opening["end_word_idx"] - opening["start_word_idx"] + 1)
-    part1_start_conf = sum(
-        w["probability"] for w in words[opening["start_word_idx"]:opening["end_word_idx"] + 1]
-    ) / n_opening_words
+    if anchor_kind == "opening":
+        part1_start = max(0.0, anchor["start_time"] - OPENING_BUFFER)
+        n_anchor_words = max(1, anchor["end_word_idx"] - anchor["start_word_idx"] + 1)
+        part1_start_conf = sum(
+            w["probability"] for w in words[anchor["start_word_idx"]:anchor["end_word_idx"] + 1]
+        ) / n_anchor_words
+    else:
+        # Adhan-end fallback: Part 1 starts shortly AFTER the adhan ends.
+        part1_start = min(duration, anchor["end_time"] + ADHAN_END_BUFFER)
+        part1_start_conf = ADHAN_FALLBACK_CONFIDENCE
 
     if progress_cb:
+        anchor_label = "opening phrase" if anchor_kind == "opening" else "adhan end (fallback)"
         progress_cb({
             "stage": "detect_boundaries",
-            "message": f"Found opening at {part1_start:.0f}s; finding sitting silence…",
+            "message": f"Found {anchor_label} at {part1_start:.0f}s; finding sitting silence…",
             "progress": 0.85,
         })
 
@@ -100,15 +123,19 @@ def run_detection_pipeline(
         end_conf = 0.6
 
     overall = min(part1_start_conf, silence_conf, end_conf)
+    transcript_at_start = " ".join(
+        w["word"] for w in words[anchor["start_word_idx"]:anchor["end_word_idx"] + 1]
+    )
+    if anchor_kind == "adhan_end":
+        transcript_at_start = f"[adhan-end fallback] {transcript_at_start}"
     return {
         "duration": duration,
         "part1": {
             "start": part1_start,
             "end": part1_end,
             "confidence": part1_start_conf,
-            "transcript_at_start": " ".join(
-                w["word"] for w in words[opening["start_word_idx"]:opening["end_word_idx"] + 1]
-            ),
+            "transcript_at_start": transcript_at_start,
+            "anchor": anchor_kind,
         },
         "part2": {
             "start": part2_start,

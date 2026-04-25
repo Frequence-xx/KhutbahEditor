@@ -2,8 +2,60 @@ from khutbah_pipeline.detect.phrases import (
     OPENING_AR,
     CLOSINGS,
     find_first_opening,
+    find_first_adhan_end,
     find_last_closing,
 )
+
+
+def _ar_words(seq: list[tuple[str, float, float]]) -> list[dict]:
+    return [{"word": w, "start": s, "end": e, "lang": "ar"} for w, s, e in seq]
+
+
+def test_adhan_end_finds_full_takbir_shahada_sequence():
+    """The full takbir+shahada is the most specific Part 1 anchor."""
+    words = _ar_words([
+        ("الله", 100.0, 100.3),
+        ("أكبر", 100.4, 100.7),
+        ("الله", 100.8, 101.1),
+        ("أكبر", 101.2, 101.5),
+        ("لا", 101.6, 101.8),
+        ("إله", 101.9, 102.2),
+        ("إلا", 102.3, 102.5),
+        ("الله", 102.6, 103.0),
+    ])
+    match = find_first_adhan_end(words)
+    assert match is not None
+    assert match["start_time"] == 100.0
+    assert match["end_time"] == 103.0
+
+
+def test_adhan_end_falls_back_to_shahada_only():
+    """When only the tail لا إله إلا الله is transcribed, that still anchors."""
+    words = _ar_words([
+        ("لا", 60.0, 60.2),
+        ("إله", 60.3, 60.5),
+        ("إلا", 60.6, 60.8),
+        ("الله", 60.9, 61.2),
+    ])
+    match = find_first_adhan_end(words)
+    assert match is not None
+    assert match["end_time"] == 61.2
+
+
+def test_adhan_end_rejects_match_past_position_guard():
+    """A late لا إله إلا الله inside the khutbah body must not anchor Part 1."""
+    words = _ar_words([
+        ("لا", 1500.0, 1500.2),
+        ("إله", 1500.3, 1500.5),
+        ("إلا", 1500.6, 1500.8),
+        ("الله", 1500.9, 1501.2),
+    ])
+    assert find_first_adhan_end(words, max_position_seconds=600.0) is None
+
+
+def test_adhan_end_returns_none_when_absent():
+    words = [{"word": "بسم", "start": 0, "end": 1, "lang": "ar"}]
+    assert find_first_adhan_end(words) is None
 
 
 def test_find_opening_returns_first_match():

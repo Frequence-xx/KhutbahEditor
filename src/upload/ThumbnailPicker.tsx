@@ -1,3 +1,5 @@
+import { toKhutbahFileUrl } from '../lib/fileUrl';
+
 type Props = {
   paths: string[];
   selectedIdx: number;
@@ -16,7 +18,7 @@ export function ThumbnailPicker({ paths, selectedIdx, onSelect }: Props) {
           }`}
           aria-label={`Thumbnail ${i + 1}${i === selectedIdx ? ' (selected)' : ''}`}
         >
-          <img src={`khutbah-file://${p}`} alt="" className="w-full h-full object-cover" />
+          <img src={toKhutbahFileUrl(p)} alt="" className="w-full h-full object-cover" />
         </button>
       ))}
     </div>

@@ -7,6 +7,7 @@ type Props = {
   onPlayPause: () => void;
   isPlaying: boolean;
   videoReady: boolean;
+  waveform?: number[] | null;
 };
 
 const COLORS: Record<MarkerKey, string> = {
@@ -32,11 +33,12 @@ function fmtTime(t: number): string {
   return `${m}:${sec.toFixed(2).padStart(5, '0')}`;
 }
 
-export function Timeline({ currentTime, onSeek, onPlayPause, isPlaying, videoReady }: Props) {
+export function Timeline({ currentTime, onSeek, onPlayPause, isPlaying, videoReady, waveform }: Props) {
   const { markers, duration, setMarker } = useMarkers();
   const trackRef = useRef<HTMLDivElement>(null);
   const dragging = useRef<MarkerKey | null>(null);
   const [zoom, setZoom] = useState<number>(1);
+  const [vZoom, setVZoom] = useState<number>(1);
 
   function pctOf(t: number): number {
     return duration > 0 ? (t / duration) * 100 : 0;
@@ -198,17 +200,32 @@ export function Timeline({ currentTime, onSeek, onPlayPause, isPlaying, videoRea
           />
           <span className="font-mono">{zoom.toFixed(1)}×</span>
         </label>
+        {waveform && (
+          <label className="flex items-center gap-2">
+            <span>Wave</span>
+            <input
+              type="range"
+              min={1}
+              max={6}
+              step={0.5}
+              value={vZoom}
+              onChange={(e) => setVZoom(parseFloat(e.target.value))}
+              className="w-24 accent-amber"
+            />
+            <span className="font-mono">{vZoom.toFixed(1)}×</span>
+          </label>
+        )}
         <span className="ml-auto text-text-dim">
           Space play/pause · J/L ±5s · ←/→ ±0.1s · I/O Part 1 · K/, Part 2
         </span>
       </div>
 
-      <div className="overflow-x-auto overflow-y-visible pb-2">
+      <div className="overflow-x-auto khutbah-scrollbar pb-2">
         <div
           ref={trackRef}
           onClick={onTrackClick}
           style={{ width: trackWidth }}
-          className="relative h-14 bg-bg-1 border border-border-strong rounded-md cursor-pointer"
+          className="relative h-20 bg-bg-1 border border-border-strong rounded-md cursor-pointer"
         >
           {ticks.map((t) => (
             <div
@@ -221,6 +238,29 @@ export function Timeline({ currentTime, onSeek, onPlayPause, isPlaying, videoRea
               </span>
             </div>
           ))}
+          {waveform && waveform.length > 0 && (
+            <svg
+              viewBox={`0 0 ${waveform.length} 100`}
+              preserveAspectRatio="none"
+              className="absolute inset-0 w-full h-full pointer-events-none"
+              aria-hidden
+            >
+              {waveform.map((p, i) => {
+                const h = Math.min(100, p * 100 * vZoom);
+                return (
+                  <line
+                    key={i}
+                    x1={i + 0.5}
+                    x2={i + 0.5}
+                    y1={50 - h / 2}
+                    y2={50 + h / 2}
+                    stroke="rgb(245 233 200 / 0.5)"
+                    strokeWidth={1}
+                  />
+                );
+              })}
+            </svg>
+          )}
           <div
             className="absolute top-0 h-full bg-amber/40 border border-amber rounded"
             style={{ left: `${pctOf(markers.p1Start)}%`, width: `${part1Width}%` }}

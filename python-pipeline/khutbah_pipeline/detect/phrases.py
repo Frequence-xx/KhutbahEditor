@@ -6,6 +6,16 @@ from khutbah_pipeline.detect.normalize_arabic import normalize_arabic
 # Stored already-normalized (no diacritics, unified alef).
 OPENING_AR: list[str] = ["ان الحمد لله"]
 
+# Adhan-end fallback for when OPENING_AR is missing (rare — happens when the
+# khateeb skips the standard opening). The adhan immediately precedes the
+# khutbah, so its ending phrase is a reliable anchor for Part 1 start.
+# Listed longest-first so we prefer the most specific match.
+# Pre-normalized — match normalize_arabic() output (no diacritics, unified alef).
+ADHAN_END_AR: list[str] = [
+    "الله اكبر الله اكبر لا اله الا الله",
+    "لا اله الا الله",
+]
+
 # Closing phrase library per language (per spec §4 stage 5).
 # All entries are pre-normalized to match the normalize_arabic() output.
 CLOSINGS: dict[str, list[str]] = {
@@ -63,6 +73,27 @@ def find_first_opening(words: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
     for phrase in OPENING_AR:
         m = _find_phrase(words, phrase)
         if m:
+            return m
+    return None
+
+
+def find_first_adhan_end(
+    words: list[dict[str, Any]],
+    max_position_seconds: float = 600.0,
+) -> Optional[dict[str, Any]]:
+    """Return the earliest adhan-end match before max_position_seconds.
+
+    Tries longest/most-specific phrase first so a full
+    "الله أكبر الله أكبر لا إله إلا الله" match wins over the bare
+    "لا إله إلا الله" tail (the latter can also appear in the khutbah body).
+
+    The position guard rejects matches past max_position_seconds — adhans
+    don't occur 20 minutes into a recording. Default 10 min is generous;
+    real adhans typically end within 4–5 min of recording start.
+    """
+    for phrase in ADHAN_END_AR:
+        m = _find_phrase(words, phrase)
+        if m and m["end_time"] <= max_position_seconds:
             return m
     return None
 

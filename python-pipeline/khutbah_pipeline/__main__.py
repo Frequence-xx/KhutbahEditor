@@ -6,6 +6,7 @@ from khutbah_pipeline.align.crosscorr import align_files
 from khutbah_pipeline.ingest.local import probe_local
 from khutbah_pipeline.ingest.youtube import info_only, download
 from khutbah_pipeline.edit.proxy import generate_proxy
+from khutbah_pipeline.edit.waveform import compute_waveform
 from khutbah_pipeline.edit.mux import apply_offset_and_mux
 from khutbah_pipeline.edit.smartcut import smart_cut
 from khutbah_pipeline.edit.thumbnail import extract_candidates
@@ -34,6 +35,11 @@ def _probe(path: str) -> dict[str, Any]:
 def _mux(video_path: str, audio_path: str, offset_seconds: float, dst: str) -> dict[str, str]:
     apply_offset_and_mux(video_path, audio_path, offset_seconds, dst)
     return {"path": dst}
+
+@register("edit.waveform")
+def _waveform(src: str, peaks_count: int = 1500) -> dict[str, Any]:
+    return compute_waveform(src, peaks_count=peaks_count)
+
 
 @register("edit.generate_proxy")
 def _proxy(

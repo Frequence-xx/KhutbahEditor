@@ -29,3 +29,42 @@
 
 html, body, #root { height: 100%; margin: 0; }
 body { font-family: theme('fontFamily.body'); background: theme('colors.bg.1'); color: theme('colors.text.DEFAULT'); }
+
+/* Dignified-dark scrollbars — match the rest of the chrome instead of
+   showing a bright OS-default bar. Firefox honours scrollbar-color/width;
+   Chromium uses ::-webkit-scrollbar-* below. .khutbah-scrollbar is the
+   slimmer variant used by the timeline's horizontal track. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: theme('colors.border.strong') theme('colors.bg.0');
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: theme('colors.bg.0');
+}
+*::-webkit-scrollbar-thumb {
+  background: theme('colors.border.strong');
+  border-radius: 6px;
+  border: 2px solid theme('colors.bg.0');
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: theme('colors.amber.dark');
+}
+*::-webkit-scrollbar-corner {
+  background: theme('colors.bg.0');
+}
+.khutbah-scrollbar::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+.khutbah-scrollbar::-webkit-scrollbar-thumb {
+  background: theme('colors.border.strong');
+  border-radius: 4px;
+  border: 1px solid theme('colors.bg.0');
+}
+.khutbah-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: theme('colors.amber.dark');
+}

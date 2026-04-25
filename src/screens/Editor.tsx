@@ -7,6 +7,8 @@ import { useMarkers } from '../editor/markersStore';
 import { ProgressBar } from '../components/ui/ProgressBar';
 import { useSettings } from '../store/settings';
 import { PartInspector } from '../editor/PartInspector';
+import { withETA, formatETA, type EnrichedProgress } from '../lib/eta';
+import { toKhutbahFileUrl } from '../lib/fileUrl';
 
 type Props = { projectId: string; onBack: () => void; onUpload: () => void };
 
@@ -35,8 +37,9 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
   const markers = useMarkers((s) => s.markers);
   const [exporting, setExporting] = useState<{ p1: number; p2: number } | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
-  const [detecting, setDetecting] = useState<{ message: string; progress?: number } | null>(null);
+  const [detecting, setDetecting] = useState<EnrichedProgress | null>(null);
   const [detectionError, setDetectionError] = useState<string | null>(null);
+  const [waveform, setWaveform] = useState<number[] | null>(null);
   const settings = useSettings((s) => s.settings);
   const loadSettings = useSettings((s) => s.load);
 
@@ -108,15 +111,15 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
   async function runDetection(): Promise<void> {
     if (!project || !window.khutbah) return;
     setDetectionError(null);
-    setDetecting({ message: 'Detecting boundaries…' });
+    setDetecting({ stage: 'detect', message: 'Detecting boundaries…' });
     let unsubscribe: (() => void) | null = null;
     try {
       unsubscribe = window.khutbah.pipeline.onProgress((params) => {
         if (params.stage === 'proxy') return;
-        setDetecting({
-          message: typeof params.message === 'string' ? params.message : 'Detecting…',
-          progress: typeof params.progress === 'number' ? Math.round(params.progress * 100) : undefined,
-        });
+        const stage = typeof params.stage === 'string' ? params.stage : 'detect';
+        const message = typeof params.message === 'string' ? params.message : 'Detecting…';
+        const progress = typeof params.progress === 'number' ? Math.round(params.progress * 100) : undefined;
+        setDetecting((prev) => withETA(prev, { stage, message, progress }));
       });
       const result = await window.khutbah.pipeline.call<DetectionResult>(
         'detect.run',
@@ -162,6 +165,29 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
       setDetecting(null);
     }
   }
+
+  // Lazy-fetch the waveform once the source is known. Background task; if it
+  // fails we silently fall back to the marker-only timeline. We pull from the
+  // ORIGINAL source (not proxy) because audio quality is irrelevant here —
+  // we just need amplitude over time. ~0.8s/5min on this machine.
+  useEffect(() => {
+    if (!project || !window.khutbah || waveform) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const w = await window.khutbah!.pipeline.call<{ peaks: number[] }>(
+          'edit.waveform',
+          { src: project.sourcePath, peaks_count: 1500 },
+        );
+        if (!cancelled) setWaveform(w.peaks);
+      } catch {
+        // Non-fatal: timeline works without waveform.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [project?.sourcePath, waveform]);
 
   function regenerateProxy(): void {
     if (!project) return;
@@ -265,7 +291,12 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
             <div className="w-2 h-2 rounded-full bg-amber animate-pulse" aria-hidden />
             <span className="text-text-strong text-sm">{detecting.message}</span>
             {detecting.progress !== undefined && (
-              <span className="ml-auto text-text-muted text-xs font-mono">{detecting.progress}%</span>
+              <span className="ml-auto text-text-muted text-xs font-mono">
+                {Math.round(detecting.progress)}%
+                {detecting.etaSeconds !== undefined && detecting.etaSeconds > 0 && (
+                  <span className="ml-2 text-text-dim">· ~{formatETA(detecting.etaSeconds)} left</span>
+                )}
+              </span>
             )}
           </div>
           <div className="h-1 mt-1 bg-border-strong rounded overflow-hidden">
@@ -324,7 +355,7 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
           {proxyReady && project.proxyPath && (
             <VideoPreview
               ref={videoRef}
-              src={`khutbah-file://${project.proxyPath}`}
+              src={toKhutbahFileUrl(project.proxyPath)}
               onTimeUpdate={setCurrentTime}
               onPlayingChange={setIsPlaying}
             />
@@ -344,6 +375,7 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
         }}
         isPlaying={isPlaying}
         videoReady={proxyReady}
+        waveform={waveform}
       />
       <div className="px-6 py-3 border-t border-border-strong flex items-center gap-3">
         {exportError && <span className="text-danger text-xs">{exportError}</span>}

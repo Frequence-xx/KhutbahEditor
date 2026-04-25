@@ -510,12 +510,27 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
               if (d && d > 0) setDuration(d);
             }}
             onMediaError={(code) => {
-              // 3=decode, 4=unsupported. Either way the proxy is unusable for
-              // playback/seek. Fall back to the source so the editor keeps
-              // working while the new proxy bakes.
-              if (code === 3 || code === 4) {
-                console.warn('[editor] proxy unusable; falling back to source', { code });
+              // 3=decode, 4=unsupported. Either way the file the <video> is
+              // pointed at is unplayable. Don't re-trigger proxy generation
+              // if one is already in flight — the source file itself might
+              // also be unplayable (e.g. yt-dlp picked an HEVC variant or
+              // the moov atom is corrupt) and we'd loop indefinitely.
+              if (code !== 3 && code !== 4) return;
+              console.warn('[editor] media decode failed', {
+                code,
+                proxyBroken,
+                proxyProgressActive: !!proxyProgress,
+              });
+              if (!proxyBroken) {
+                // First failure was on the proxy — fall back to source
+                // while we regenerate.
                 setProxyBroken(true);
+                if (!proxyProgress) regenerateProxy();
+              } else if (!proxyProgress) {
+                // Second failure: source also unplayable AND no proxy job
+                // is running. Kick one off so we have any chance of a
+                // working file. The mediaError overlay surfaces the state
+                // to the user; seeks will queue/no-op until proxy lands.
                 regenerateProxy();
               }
             }}

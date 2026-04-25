@@ -6,4 +6,7 @@ contextBridge.exposeInMainWorld('khutbah', {
     call: <T = unknown>(method: string, params?: object): Promise<T> =>
       ipcRenderer.invoke('pipeline:call', { method, params }) as Promise<T>,
   },
+  dialog: {
+    openVideo: () => ipcRenderer.invoke('dialog:openVideo') as Promise<string | null>,
+  },
 });

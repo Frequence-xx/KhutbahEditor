@@ -72,17 +72,7 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
   );
 
   // When the proxy file is broken (decode error / unsupported codec — happens
-  // when an older proxy was generated before a sidecar fix, or aborted mid-
-  // write), the <video> element silently rejects every seek attempt and the
-  // user sees "click goes to t=0" forever. Detect via the <video> error event
-  // and fall back to the source file URL so seeks work while the new proxy
-  // regenerates in the background.
-  const [proxyBroken, setProxyBroken] = useState<boolean>(false);
-  useEffect(() => {
-    // Reset the override whenever we have a fresh proxyPath — that's the
-    // signal that proxy regeneration finished and we should try it again.
-    setProxyBroken(false);
-  }, [project?.proxyPath]);
+  const [videoError, setVideoError] = useState<string | null>(null);
   function startResize(e: ReactMouseEvent): void {
     e.preventDefault();
     const startX = e.clientX;
@@ -334,6 +324,7 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
   function regenerateProxy(): void {
     if (!project) return;
     setError(null);
+    setVideoError(null);
     setProxyReady(false);
     setProxyProgress({ message: 'Restarting preview proxy…' });
     // Clearing proxyPath retriggers the proxy-generation useEffect.
@@ -497,9 +488,7 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
         <div className="bg-bg-0 p-4 border-y border-l border-border-strong rounded-l-lg overflow-y-auto khutbah-scrollbar">
           <VideoPreview
             ref={videoRef}
-            src={toKhutbahFileUrl(
-              proxyBroken || !project.proxyPath ? project.sourcePath : project.proxyPath,
-            )}
+            src={toKhutbahFileUrl(project.proxyPath ?? project.sourcePath)}
             onTimeUpdate={setCurrentTime}
             onPlayingChange={setIsPlaying}
             onLoadedMetadata={(d) => {
@@ -510,28 +499,17 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
               if (d && d > 0) setDuration(d);
             }}
             onMediaError={(code) => {
-              // 3=decode, 4=unsupported. Either way the file the <video> is
-              // pointed at is unplayable. Don't re-trigger proxy generation
-              // if one is already in flight — the source file itself might
-              // also be unplayable (e.g. yt-dlp picked an HEVC variant or
-              // the moov atom is corrupt) and we'd loop indefinitely.
-              if (code !== 3 && code !== 4) return;
-              console.warn('[editor] media decode failed', {
-                code,
-                proxyBroken,
-                proxyProgressActive: !!proxyProgress,
-              });
-              if (!proxyBroken) {
-                // First failure was on the proxy — fall back to source
-                // while we regenerate.
-                setProxyBroken(true);
-                if (!proxyProgress) regenerateProxy();
-              } else if (!proxyProgress) {
-                // Second failure: source also unplayable AND no proxy job
-                // is running. Kick one off so we have any chance of a
-                // working file. The mediaError overlay surfaces the state
-                // to the user; seeks will queue/no-op until proxy lands.
-                regenerateProxy();
+              console.error('[editor] video decode error', { code, src: project.proxyPath ?? project.sourcePath });
+              // Don't silently switch to source — that's how we ended up in regen loops
+              // when the source was ALSO unfriendly. Surface the error; the user can
+              // hit "Rebuild proxy" if they want to retry. We do auto-trigger one
+              // rebuild attempt if no rebuild is currently in progress, since the
+              // common case is "proxy gen got interrupted, file is truncated".
+              if (code === 3 || code === 4) {
+                setVideoError(`Preview failed to decode (code=${code}). Click Rebuild Proxy to regenerate.`);
+                if (!proxyProgress) {
+                  regenerateProxy();
+                }
               }
             }}
           />
@@ -569,6 +547,14 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
             <div className="mt-2 px-3 py-2 bg-danger/10 border border-danger/40 rounded text-xs text-danger flex items-center gap-2">
               <span>Preview proxy failed: {error}</span>
               <Button variant="ghost" onClick={regenerateProxy}>↻ Try again</Button>
+            </div>
+          )}
+          {videoError && (
+            <div className="mt-2 px-3 py-2 bg-danger/10 border border-danger/40 rounded text-sm">
+              <span className="text-danger font-medium">{videoError}</span>{' '}
+              <Button variant="ghost" onClick={regenerateProxy} disabled={!!proxyProgress}>
+                ↻ Rebuild proxy
+              </Button>
             </div>
           )}
           <div className="mt-3 text-text-muted text-xs font-mono">Time: {currentTime.toFixed(2)} s</div>

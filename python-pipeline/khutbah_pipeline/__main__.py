@@ -25,8 +25,17 @@ def _smart_cut(
     start: float,
     end: float,
     normalize_audio: bool = True,
+    target_lufs: float = -14.0,
+    target_tp: float = -1.0,
+    target_lra: float = 11.0,
 ) -> dict[str, str]:
-    smart_cut(src, dst, start, end, normalize_audio=normalize_audio)
+    smart_cut(
+        src, dst, start, end,
+        normalize_audio=normalize_audio,
+        target_lufs=target_lufs,
+        target_tp=target_tp,
+        target_lra=target_lra,
+    )
     return {"output": dst}
 
 if __name__ == "__main__":

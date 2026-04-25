@@ -5,6 +5,7 @@ import { Button } from '../components/ui/Button';
 import { Timeline } from '../editor/Timeline';
 import { useMarkers } from '../editor/markersStore';
 import { ProgressBar } from '../components/ui/ProgressBar';
+import { useSettings } from '../store/settings';
 
 type Props = { projectId: string; onBack: () => void };
 
@@ -19,6 +20,10 @@ export function Editor({ projectId, onBack }: Props) {
   const markers = useMarkers((s) => s.markers);
   const [exporting, setExporting] = useState<{ p1: number; p2: number } | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  const settings = useSettings((s) => s.settings);
+  const loadSettings = useSettings((s) => s.load);
+
+  useEffect(() => { loadSettings(); }, [loadSettings]);
 
   useEffect(() => {
     if (project) reset(project.duration);
@@ -48,21 +53,30 @@ export function Editor({ projectId, onBack }: Props) {
   }, [project?.id, project?.proxyPath, project?.sourcePath, updateProject]);
 
   async function exportBoth(): Promise<void> {
-    if (!project || !window.khutbah) return;
+    if (!project || !window.khutbah || !settings) return;
     setExportError(null);
     setExporting({ p1: 0, p2: 0 });
     try {
-      const dir = await window.khutbah.paths.defaultOutputDir();
+      // Use user-configured output dir if set, else default
+      const dir = settings.outputDir ?? (await window.khutbah.paths.defaultOutputDir());
       await window.khutbah.paths.ensureDir(dir);
       const base = `${project.id}-${Date.now()}`;
       const p1Out = `${dir}/${base}-deel-1.mp4`;
       const p2Out = `${dir}/${base}-deel-2.mp4`;
+
+      const audioParams = {
+        target_lufs: settings.audioTargetLufs,
+        target_tp: settings.audioTargetTp,
+        target_lra: settings.audioTargetLra,
+      };
 
       await window.khutbah.pipeline.call('edit.smart_cut', {
         src: project.sourcePath,
         dst: p1Out,
         start: markers.p1Start,
         end: markers.p1End,
+        normalize_audio: true,
+        ...audioParams,
       });
       setExporting({ p1: 100, p2: 0 });
 
@@ -71,6 +85,8 @@ export function Editor({ projectId, onBack }: Props) {
         dst: p2Out,
         start: markers.p2Start,
         end: markers.p2End,
+        normalize_audio: true,
+        ...audioParams,
       });
       setExporting({ p1: 100, p2: 100 });
       updateProject(project.id, {
@@ -78,8 +94,9 @@ export function Editor({ projectId, onBack }: Props) {
         part1: { start: markers.p1Start, end: markers.p1End, outputPath: p1Out },
         part2: { start: markers.p2Start, end: markers.p2End, outputPath: p2Out },
       });
-    } catch (e) {
-      setExportError(String(e));
+    } catch (e: unknown) {
+      const msg = e && typeof e === 'object' && 'message' in e ? String((e as { message: unknown }).message) : String(e);
+      setExportError(msg);
       setExporting(null);
     }
   }
@@ -128,7 +145,7 @@ export function Editor({ projectId, onBack }: Props) {
           <Button
             variant="primary"
             onClick={exportBoth}
-            disabled={!proxyReady || !!exporting}
+            disabled={!proxyReady || !!exporting || !settings}
           >
             Export 2 files
           </Button>

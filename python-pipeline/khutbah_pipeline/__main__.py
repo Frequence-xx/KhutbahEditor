@@ -44,8 +44,14 @@ def _smart_cut(
 def _detect(audio_path: str, model_dir: str = "") -> dict[str, Any]:
     """Run the khutbah detection pipeline.
 
-    `model_dir` defaults to the bundled Whisper model path (relative to
-    python-pipeline/ cwd, or via KHUTBAH_MODEL_DIR env override).
+    `model_dir` defaults to:
+    1. KHUTBAH_MODEL_DIR env override (used by Electron main to pass the
+       packaged path — set in electron/sidecar/manager.ts at Phase 5)
+    2. ../resources/models/whisper-large-v3 relative to cwd (dev path)
+
+    The packaged app bundles the model at <resourcesPath>/models/whisper-large-v3/
+    (see electron-builder.json extraResources). Electron main will set
+    KHUTBAH_MODEL_DIR to that resolved path before spawning the sidecar.
     """
     if not model_dir:
         model_dir = os.environ.get(

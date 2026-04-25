@@ -116,6 +116,24 @@ export async function runAutoPilot(
   });
   onProgress({ stage: 'export', message: 'Exporting parts…', progress: 100 });
 
+  // After both parts are exported, extract thumbnails for each.
+  onProgress({ stage: 'export', message: 'Extracting thumbnails…', progress: 100 });
+  const thumbsDir1 = p1Out + '.thumbs';
+  const thumbsDir2 = p2Out + '.thumbs';
+  const t1 = await window.khutbah.pipeline.call<{ paths: string[] }>(
+    'edit.thumbnails',
+    { src: p1Out, output_dir: thumbsDir1, count: 6 },
+  );
+  const t2 = await window.khutbah.pipeline.call<{ paths: string[] }>(
+    'edit.thumbnails',
+    { src: p2Out, output_dir: thumbsDir2, count: 6 },
+  );
+  // Pick a sensible default thumb (3rd one, or first available).
+  const thumbPath: Record<1 | 2, string | undefined> = {
+    1: t1.paths[Math.min(2, t1.paths.length - 1)],
+    2: t2.paths[Math.min(2, t2.paths.length - 1)],
+  };
+
   // Stage 3: upload to every auto-publish account
   const allAccounts: YouTubeAccount[] = await window.khutbah.auth.listAccounts();
   const targets = allAccounts.filter((a) => a.autoPublish);
@@ -193,6 +211,23 @@ export async function runAutoPilot(
         });
         if (n === 1) uploads[account.channelId].p1 = r.video_id;
         else uploads[account.channelId].p2 = r.video_id;
+
+        // Upload thumbnail if one was extracted — non-fatal on failure.
+        if (thumbPath[n]) {
+          try {
+            await window.khutbah.pipeline.call('upload.thumbnail', {
+              access_token: accessToken,
+              video_id: r.video_id,
+              thumbnail_path: thumbPath[n],
+            });
+          } catch (e) {
+            // Thumbnail failure is non-fatal — log to errors but don't fail the upload.
+            const msg = e && typeof e === 'object' && 'message' in e
+              ? String((e as { message: unknown }).message)
+              : String(e);
+            uploads[account.channelId].errors.push(`thumbnail (part ${n}): ${msg}`);
+          }
+        }
 
         // Optional: add to default playlist for this account
         if (account.defaultPlaylistId || account.defaultPlaylistName) {

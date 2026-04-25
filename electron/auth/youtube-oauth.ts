@@ -5,9 +5,13 @@ import { URL } from 'url';
 import { tokens } from './keychain.js';
 import { accounts, YouTubeAccount } from './accounts.js';
 
-// Embedded — public client id is fine for desktop OAuth (no secret needed with PKCE)
+// Public desktop OAuth client ID. Per spec §7.1, PKCE means no client secret;
+// the client ID is meant to ship in the binary. Frequence-xx Google Cloud
+// Desktop application credentials. The .env override is kept for local
+// development across multiple OAuth clients.
+const PUBLIC_DESKTOP_CLIENT_ID = '397103661369-ekgvoaahrecmk61ncp67oor8kl678rjq.apps.googleusercontent.com';
 const CLIENT_ID: string =
-  process.env.GOOGLE_OAUTH_CLIENT_ID || 'PLACEHOLDER_CLIENT_ID.apps.googleusercontent.com';
+  process.env.GOOGLE_OAUTH_CLIENT_ID || PUBLIC_DESKTOP_CLIENT_ID;
 const SCOPES: string = [
   'https://www.googleapis.com/auth/youtube.upload',
   'https://www.googleapis.com/auth/youtube',

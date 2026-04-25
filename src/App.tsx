@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { TitleBar } from './components/TitleBar';
+import { Welcome } from './screens/Welcome';
 import { Library } from './screens/Library';
 import { NewKhutbah } from './screens/NewKhutbah';
 import { Editor } from './screens/Editor';
@@ -12,6 +13,7 @@ import { useIpcOnce } from './hooks/useIpc';
 import { runAutoPilot } from './lib/autopilot';
 
 type Screen =
+  | { name: 'welcome' }
   | { name: 'library' }
   | { name: 'new' }
   | { name: 'processing'; projectId: string }
@@ -27,6 +29,17 @@ export default function App() {
 
   useEffect(() => {
     void useSettings.getState().load();
+  }, []);
+
+  useEffect(() => {
+    if (!window.khutbah) return;
+    (async () => {
+      const accounts = await window.khutbah!.auth.listAccounts();
+      const projectsCount = useProjects.getState().projects.length;
+      if (accounts.length === 0 && projectsCount === 0) {
+        setScreen({ name: 'welcome' });
+      }
+    })();
   }, []);
 
   async function maybeAutoPilot(projectId: string): Promise<void> {
@@ -214,6 +227,23 @@ export default function App() {
           </div>
         }
       />
+      {screen.name === 'welcome' && (
+        <Welcome
+          onSignIn={async () => {
+            if (!window.khutbah) return;
+            try {
+              await window.khutbah.auth.signIn();
+              setScreen({ name: 'library' });
+            } catch (e: unknown) {
+              const msg = e && typeof e === 'object' && 'message' in e
+                ? String((e as { message: unknown }).message)
+                : String(e);
+              alert(`Sign-in failed: ${msg}`);
+            }
+          }}
+          onSkip={() => setScreen({ name: 'library' })}
+        />
+      )}
       {screen.name === 'library' && (
         <Library
           onNewProject={() => setScreen({ name: 'new' })}

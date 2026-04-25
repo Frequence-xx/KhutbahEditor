@@ -6,6 +6,7 @@ from khutbah_pipeline.ingest.local import probe_local
 from khutbah_pipeline.ingest.youtube import info_only, download
 from khutbah_pipeline.edit.proxy import generate_proxy
 from khutbah_pipeline.edit.smartcut import smart_cut
+from khutbah_pipeline.edit.thumbnail import extract_candidates
 from khutbah_pipeline.detect.pipeline import run_detection_pipeline
 from khutbah_pipeline.upload.youtube_api import upload_video, set_thumbnail, update_metadata
 from khutbah_pipeline.upload.playlists import (
@@ -47,6 +48,11 @@ def _smart_cut(
         target_lra=target_lra,
     )
     return {"output": dst}
+
+
+@register("edit.thumbnails")
+def _thumbs(src: str, output_dir: str, count: int = 6) -> dict[str, list[str]]:
+    return {"paths": extract_candidates(src, output_dir, count)}
 
 @register("ingest.youtube_info")
 def _yt_info(url: str) -> dict[str, Any]:

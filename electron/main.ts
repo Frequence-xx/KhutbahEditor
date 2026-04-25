@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, shell } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { SidecarManager } from './sidecar/manager.js';
@@ -26,6 +26,34 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: true,
     },
+  });
+
+  // Security hardening: deny all new-window requests; route allowed external
+  // URLs through the OS browser via shell.openExternal.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    // Allow YouTube links to open in the default browser; deny everything else.
+    try {
+      const parsed = new URL(url);
+      if (
+        parsed.protocol === 'https:' &&
+        ['www.youtube.com', 'youtube.com', 'm.youtube.com', 'youtu.be'].includes(parsed.hostname)
+      ) {
+        shell.openExternal(url);
+      }
+    } catch {
+      // ignore — invalid URL → deny
+    }
+    return { action: 'deny' };
+  });
+
+  // Block any in-window navigation away from the local Vite dev server / packaged file.
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const allowed = isDev
+      ? url.startsWith('http://localhost:5173')
+      : url.startsWith('file://');
+    if (!allowed) {
+      event.preventDefault();
+    }
   });
 
   if (isDev) {

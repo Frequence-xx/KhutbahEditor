@@ -12,6 +12,7 @@ def detect_silences(
     """Run ffmpeg silencedetect filter and parse silence_start/silence_end events.
 
     Returns a list of silence intervals: [{"start", "end", "duration"}, ...].
+    Raises RuntimeError if FFmpeg fails (per CLAUDE.md no-silent-error rule).
     """
     cmd = [
         FFMPEG, "-hide_banner", "-i", audio_path,
@@ -19,6 +20,13 @@ def detect_silences(
         "-f", "null", "-",
     ]
     r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        # Surface the FFmpeg error rather than returning [] (which would be
+        # indistinguishable from "no silences found").
+        raise RuntimeError(
+            f"ffmpeg silencedetect failed (exit {r.returncode}): "
+            f"{r.stderr[-500:]}"
+        )
     text = r.stderr
     starts = [float(m.group(1)) for m in re.finditer(r"silence_start: (\d+\.?\d*)", text)]
     ends = [float(m.group(1)) for m in re.finditer(r"silence_end: (\d+\.?\d*)", text)]

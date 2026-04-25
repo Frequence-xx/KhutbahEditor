@@ -382,10 +382,21 @@ Registered Google Cloud project type: "Desktop app". Embedded credentials: `clie
 
 ### 7.2 Token lifecycle
 
-- Access token in memory only
-- Refresh token in OS keychain only
+- Access token in memory only (1 h TTL from Google)
+- Refresh token in OS keychain only (per `channelId`)
 - Before each API call: if access_token expires < 60 s, refresh it
-- If refresh fails (revoked/expired): clear keychain entry, prompt re-auth
+- If refresh fails with `invalid_grant` (revoked or expired): clear that channel's keychain entry, mark the account as `needs_reauth`, surface a non-blocking toast in the renderer (`"Sign-in expired for <channelTitle> — click to re-authenticate"`), and route the OAuth flow back through `signInWithGoogle()` for that account
+
+### 7.2.1 Testing-mode 7-day refresh-token reality (operational note)
+
+While the OAuth consent screen is in **Testing** state (which is the v1 plan — see §11), Google issues refresh tokens that expire after **7 days**. This affects auto-pilot UX:
+
+- Weekly khutbah workflow: upload Friday → refresh token expires roughly the following Friday → user re-auths before next upload. Workable but requires user action ~weekly.
+- Multi-account: each account's refresh token has its own 7-day clock from its sign-in time. They expire independently.
+- Auto-pilot behavior on expired refresh: the orchestrator detects `invalid_grant` for a specific account, surfaces a clear toast (`"Sign-in expired for <channelTitle> — re-authenticate to publish"`), proceeds with all other accounts whose tokens are still valid, and surfaces a "1 of N uploads needs re-auth" notification at the end.
+- Once the OAuth consent screen is moved to **In production** (which requires Google's app verification + YouTube API services audit, a 4-6 week external process), refresh tokens become long-lived and this 7-day cycle goes away. v1 stays in Testing mode.
+
+This is a deliberate Google policy and cannot be bypassed in Testing mode. The app must handle it gracefully — never lose user data, never block other uploads, always surface a one-click path back to re-auth.
 
 ### 7.3 Resumable upload
 

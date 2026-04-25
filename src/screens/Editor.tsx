@@ -140,7 +140,7 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
           {proxyReady && project.proxyPath && (
             <VideoPreview
               ref={videoRef}
-              src={`file://${project.proxyPath}`}
+              src={`khutbah-file://${project.proxyPath}`}
               onTimeUpdate={setCurrentTime}
             />
           )}

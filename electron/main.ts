@@ -1,5 +1,6 @@
-import { app, BrowserWindow, shell } from 'electron';
+import { app, BrowserWindow, shell, protocol, net } from 'electron';
 import path from 'path';
+import os from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
 import electronUpdater from 'electron-updater';
 import { SidecarManager } from './sidecar/manager.js';
@@ -9,6 +10,19 @@ const { autoUpdater } = electronUpdater;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged;
+
+// Register custom scheme BEFORE app.ready so the renderer trusts it.
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'khutbah-file',
+    privileges: {
+      secure: true,
+      supportFetchAPI: true,
+      stream: true,
+      bypassCSP: false,
+    },
+  },
+]);
 
 const BG_BACKGROUND = '#0C1118'; // matches tailwind colors.bg.1
 
@@ -150,6 +164,44 @@ app.whenReady().then(async () => {
     // Continue anyway so the window opens with a clearly-broken state, rather than the app silently dying.
   }
   registerIpcHandlers(sidecar);
+
+  // Map khutbah-file://<absolute path> to the local file. Used by the renderer
+  // to load video proxy + thumbnails without tripping Chromium's file:// block
+  // (file:// can't be loaded from an http://localhost:5173 origin in dev).
+  //
+  // Path validation: only absolute filesystem paths under the user's HOME or
+  // the OS temp dir are allowed, plus the dev-only repo dir. Anything else
+  // returns 403 — the URL is otherwise renderer-controlled.
+  const allowedRoots: string[] = [
+    os.homedir(),
+    os.tmpdir(),
+    ...(isDev ? [path.resolve(__dirname, '..')] : []),
+  ];
+
+  protocol.handle('khutbah-file', (request) => {
+    try {
+      const url = new URL(request.url);
+      // pathname is /abs/path on POSIX. On Windows, /C:/abs/path — strip the leading slash.
+      let filePath = decodeURIComponent(url.pathname);
+      if (process.platform === 'win32' && /^\/[a-zA-Z]:/.test(filePath)) {
+        filePath = filePath.slice(1);
+      }
+      const resolved = path.resolve(filePath);
+      const allowed = allowedRoots.some(
+        (root) =>
+          resolved.startsWith(path.resolve(root) + path.sep) ||
+          resolved === path.resolve(root),
+      );
+      if (!allowed) {
+        return new Response(null, { status: 403 });
+      }
+      return net.fetch(`file://${resolved}`);
+    } catch (e) {
+      console.error('[khutbah-file] failed:', e);
+      return new Response(null, { status: 500 });
+    }
+  });
+
   createWindow();
   if (!isDev) {
     autoUpdater.checkForUpdatesAndNotify().catch((e) => {

@@ -16,7 +16,7 @@ export function ThumbnailPicker({ paths, selectedIdx, onSelect }: Props) {
           }`}
           aria-label={`Thumbnail ${i + 1}${i === selectedIdx ? ' (selected)' : ''}`}
         >
-          <img src={`file://${p}`} alt="" className="w-full h-full object-cover" />
+          <img src={`khutbah-file://${p}`} alt="" className="w-full h-full object-cover" />
         </button>
       ))}
     </div>

@@ -87,6 +87,41 @@ export function Timeline({
     onSeek(t);
   }
 
+  // Drag-to-scrub anywhere on the timeline track. Mouse down → instant
+  // jump + start scrub; mouse move → live seek; mouse up → release.
+  // Mirrors the playhead-handle scrub pattern (window listeners, scrubbing
+  // ref guards the trailing click event).
+  function onTrackMouseDown(e: MouseEvent<HTMLDivElement>): void {
+    // Don't hijack drags that started on a marker or the playhead handle —
+    // their own onMouseDown already handles them and stopPropagation is
+    // unreliable in React's synthetic event system.
+    const tgt = e.target as HTMLElement;
+    if (tgt.closest('[data-marker-handle]') || tgt.closest('[data-playhead-handle]')) {
+      return;
+    }
+    if (!trackRef.current) return;
+    const rect = trackRef.current.getBoundingClientRect();
+    const seekFromX = (clientX: number) => {
+      const xWithin = clientX - rect.left;
+      const frac = rect.width > 0 ? xWithin / rect.width : 0;
+      const t = Math.max(0, Math.min(duration, frac * duration));
+      setLastClick({ x: xWithin, t, ts: Date.now() });
+      onSeek(t);
+    };
+    scrubbing.current = true;
+    seekFromX(e.clientX);
+    const onMove = (ev: globalThis.MouseEvent) => seekFromX(ev.clientX);
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      // Keep `scrubbing` true through the synthetic click that fires on
+      // mouseup so onTrackClick doesn't double-seek. Cleared next tick.
+      setTimeout(() => { scrubbing.current = false; }, 0);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }
+
   useEffect(() => {
     if (!lastClick) return;
     const id = window.setTimeout(() => setLastClick(null), 700);
@@ -316,8 +351,9 @@ export function Timeline({
         <div
           ref={trackRef}
           onClick={onTrackClick}
+          onMouseDown={onTrackMouseDown}
           style={{ width: trackWidth }}
-          className="relative cursor-pointer"
+          className="relative cursor-pointer select-none"
         >
           {/* Ruler row — timestamps + tick marks. Always-clickable for seek. */}
           <div className="relative h-5 bg-bg-2 border border-border-strong rounded-t">
@@ -383,6 +419,7 @@ export function Timeline({
             {(['p1Start', 'p1End', 'p2Start', 'p2End'] as MarkerKey[]).map((key) => (
               <div
                 key={key}
+                data-marker-handle
                 onMouseDown={(e) => onMarkerMouseDown(e, key)}
                 className="absolute -top-1 -bottom-1 w-1 cursor-ew-resize z-10"
                 style={{ left: `${pctOf(markers[key])}%` }}
@@ -458,6 +495,7 @@ export function Timeline({
               {fmtTime(currentTime)}
             </div>
             <div
+              data-playhead-handle
               onMouseDown={onPlayheadMouseDown}
               onClick={(e) => e.stopPropagation()}
               className="absolute top-3 -left-2.5 w-5 h-5 cursor-ew-resize pointer-events-auto"

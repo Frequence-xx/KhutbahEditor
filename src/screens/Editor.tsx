@@ -131,38 +131,52 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
   useEffect(() => {
     if (!project || project.proxyPath || !window.khutbah) return;
     let cancelled = false;
-    setProxyProgress({ message: 'Starting preview proxy…' });
-    const unsubscribe = window.khutbah.pipeline.onProgress((params) => {
-      if (cancelled || params.stage !== 'proxy') return;
-      setProxyProgress({
-        message: typeof params.message === 'string' ? params.message : 'Generating preview proxy…',
-        progress: typeof params.progress === 'number' ? Math.round(params.progress * 100) : undefined,
-      });
-    });
     (async () => {
+      // Probe first: if already scrub-friendly, point proxyPath at the source
+      // and skip the ~30s proxy-gen step entirely.
+      let friendly = false;
+      try {
+        friendly = await window.khutbah!.pipeline.call<boolean>(
+          'paths.is_chromium_friendly', { path: project.sourcePath }
+        );
+      } catch {
+        friendly = false;
+      }
+      if (cancelled) return;
+      if (friendly) {
+        updateProject(project.id, { proxyPath: project.sourcePath, proxySkipped: true });
+        setProxyReady(true);
+        return;
+      }
+      setProxyProgress({ message: 'Starting preview proxy…' });
+      const unsubscribe = window.khutbah!.pipeline.onProgress((params) => {
+        if (cancelled || params.stage !== 'proxy') return;
+        setProxyProgress({
+          message: typeof params.message === 'string' ? params.message : 'Generating preview proxy…',
+          progress: typeof params.progress === 'number' ? Math.round(params.progress * 100) : undefined,
+        });
+      });
       try {
         const proxyPath = project.sourcePath + '.proxy.mp4';
         await window.khutbah!.pipeline.call('edit.generate_proxy', {
           src: project.sourcePath,
           dst: proxyPath,
         });
-        if (cancelled) return;
+        if (cancelled) { unsubscribe(); return; }
         updateProject(project.id, { proxyPath });
         setProxyReady(true);
         setProxyProgress(null);
       } catch (e: unknown) {
-        if (cancelled) return;
+        if (cancelled) { unsubscribe(); return; }
         const msg = e && typeof e === 'object' && 'message' in e
           ? String((e as { message: unknown }).message)
           : String(e);
         setError(msg);
         setProxyProgress(null);
       }
-    })();
-    return () => {
-      cancelled = true;
       unsubscribe();
-    };
+    })();
+    return () => { cancelled = true; };
   }, [project?.id, project?.proxyPath, project?.sourcePath, updateProject]);
 
   async function runDetection(): Promise<void> {

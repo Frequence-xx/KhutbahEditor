@@ -24,6 +24,8 @@ export type Project = {
   id: string;
   sourcePath: string;
   proxyPath?: string;
+  /** True when the source was already scrub-friendly and proxy generation was skipped. */
+  proxySkipped?: boolean;
   duration: number;
   createdAt: number;
   status: 'draft' | 'processed' | 'uploaded' | 'failed';

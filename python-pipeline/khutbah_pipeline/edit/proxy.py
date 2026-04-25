@@ -1,7 +1,58 @@
+import json as _json
 import subprocess
 from typing import Any, Callable, Optional
 
-from khutbah_pipeline.util.ffmpeg import FFMPEG, ffprobe_json
+from khutbah_pipeline.util.ffmpeg import FFMPEG, FFPROBE, ffprobe_json
+
+
+_FRIENDLY_VIDEO_CODECS = {"h264"}
+_FRIENDLY_PIX_FMTS = {"yuv420p", "yuvj420p"}
+_FRIENDLY_AUDIO_CODECS = {"aac", "mp3"}
+MAX_FRIENDLY_GOP_SECONDS = 2.0  # GOP > 2 s makes scrub feel laggy
+
+
+def is_chromium_friendly(src: str) -> bool:
+    """Return True if Chromium can play `src` directly with snappy scrub.
+
+    Used by the renderer to skip proxy generation when the source is
+    already an 8-bit short-GOP H.264 file. Saves ~30 s of proxy work on
+    every fresh import for already-friendly sources.
+    """
+    try:
+        meta = ffprobe_json(src)
+    except Exception:
+        return False
+    streams = meta.get("streams", [])
+    v = next((s for s in streams if s.get("codec_type") == "video"), None)
+    a = next((s for s in streams if s.get("codec_type") == "audio"), None)
+    if v is None:
+        return False
+    if v.get("codec_name") not in _FRIENDLY_VIDEO_CODECS:
+        return False
+    if v.get("pix_fmt") not in _FRIENDLY_PIX_FMTS:
+        return False
+    if a is not None and a.get("codec_name") not in _FRIENDLY_AUDIO_CODECS:
+        return False
+    r = subprocess.run(
+        [FFPROBE, "-v", "error",
+         "-skip_frame", "nokey",
+         "-show_entries", "frame=pts_time",
+         "-select_streams", "v:0",
+         "-read_intervals", "%+30",
+         "-of", "json", src],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        return False
+    times = [
+        float(f["pts_time"])
+        for f in _json.loads(r.stdout).get("frames", [])
+        if f.get("pts_time")
+    ]
+    if len(times) < 2:
+        return True
+    max_interval = max(times[i + 1] - times[i] for i in range(len(times) - 1))
+    return max_interval <= MAX_FRIENDLY_GOP_SECONDS
 
 
 def _probe_duration(path: str) -> Optional[float]:

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from khutbah_pipeline.edit.proxy import generate_proxy
+from khutbah_pipeline.edit.proxy import generate_proxy, is_chromium_friendly
 
 FIXTURE = Path(__file__).parent / "fixtures" / "short_khutbah.mp4"
 
@@ -112,3 +112,33 @@ def test_proxy_has_short_gop_for_fast_scrubbing(hidef_10bit_source: Path, tmp_pa
     generate_proxy(str(hidef_10bit_source), str(proxy))
     interval_x100 = _gop_size(proxy)
     assert interval_x100 <= 150, f"GOP interval too large for snappy scrub: {interval_x100/100:.2f}s"
+
+
+# ---------------------------------------------------------------------------
+# Task 2.3: is_chromium_friendly skip-proxy probe
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def friendly_source(tmp_path: Path) -> Path:
+    """An 8-bit yuv420p H.264 + AAC mp4 with short GOP — should not need a proxy."""
+    out = tmp_path / "friendly.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y",
+         "-f", "lavfi", "-i", "testsrc=duration=5:size=1280x720:rate=24",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=5",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p",
+         "-profile:v", "main", "-g", "24", "-keyint_min", "24",
+         "-c:a", "aac",
+         "-loglevel", "error", str(out)],
+        check=True, capture_output=True,
+    )
+    return out
+
+
+def test_is_chromium_friendly_yes_for_8bit_short_gop(friendly_source: Path) -> None:
+    assert is_chromium_friendly(str(friendly_source)) is True
+
+
+def test_is_chromium_friendly_no_for_10bit(hidef_10bit_source: Path) -> None:
+    assert is_chromium_friendly(str(hidef_10bit_source)) is False

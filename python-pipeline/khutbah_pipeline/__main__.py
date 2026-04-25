@@ -68,6 +68,12 @@ def _proxy(
     generate_proxy(src, dst, progress_cb=notify)
     return {"path": dst}
 
+
+@register("paths.is_chromium_friendly")
+def _paths_is_chromium_friendly(path: str) -> bool:
+    from khutbah_pipeline.edit.proxy import is_chromium_friendly
+    return is_chromium_friendly(path)
+
 @register("edit.smart_cut")
 def _smart_cut(
     src: str,

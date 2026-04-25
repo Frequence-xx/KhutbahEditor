@@ -23,7 +23,7 @@
     "test:e2e": "playwright test",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "build:pipeline": "cd python-pipeline && .venv/bin/pyinstaller --noconfirm khutbah_pipeline.spec"
+    "build:pipeline": "cd python-pipeline && python -m PyInstaller --noconfirm khutbah_pipeline.spec"
   },
   "author": "Stichting Al-Himmah <info@alhimmah.nl>",
   "license": "MIT",

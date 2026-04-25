@@ -39,12 +39,21 @@ function createWindow() {
 app.whenReady().then(async () => {
   sidecar = isDev
     ? new SidecarManager({
-        pythonExecutable: path.resolve('python-pipeline/.venv/bin/python'),
+        pythonExecutable: path.resolve(
+          process.platform === 'win32'
+            ? 'python-pipeline/.venv/Scripts/python.exe'
+            : 'python-pipeline/.venv/bin/python',
+        ),
         moduleEntry: 'khutbah_pipeline',
         cwd: path.resolve('python-pipeline'),
       })
     : new SidecarManager({
-        pythonExecutable: path.join(process.resourcesPath, 'python-pipeline/khutbah_pipeline'),
+        pythonExecutable: path.join(
+          process.resourcesPath,
+          process.platform === 'win32'
+            ? 'python-pipeline/khutbah_pipeline.exe'
+            : 'python-pipeline/khutbah_pipeline',
+        ),
         moduleEntry: 'khutbah_pipeline',
         cwd: process.resourcesPath,
       });

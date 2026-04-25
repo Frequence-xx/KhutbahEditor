@@ -22,10 +22,16 @@ export default function App() {
     if (!window.khutbah) return;
     const path = await window.khutbah.dialog.openVideo();
     if (!path) return;
-    const probe = await window.khutbah.pipeline.call<{ duration: number }>('ingest.probe_local', { path });
-    const id = path.replace(/[^a-z0-9]/gi, '_');
-    addProject({ id, sourcePath: path, duration: probe.duration, createdAt: Date.now(), status: 'draft' });
-    setScreen({ name: 'editor', projectId: id });
+    try {
+      const probe = await window.khutbah.pipeline.call<{ duration: number }>('ingest.probe_local', { path });
+      const id = path.replace(/[^a-z0-9]/gi, '_');
+      addProject({ id, sourcePath: path, duration: probe.duration, createdAt: Date.now(), status: 'draft' });
+      setScreen({ name: 'editor', projectId: id });
+    } catch (e: unknown) {
+      // JSON-RPC errors come through with a `message` field
+      const msg = e && typeof e === 'object' && 'message' in e ? String((e as { message: unknown }).message) : String(e);
+      alert(`Cannot import this file: ${msg}`);
+    }
   }
 
   return (

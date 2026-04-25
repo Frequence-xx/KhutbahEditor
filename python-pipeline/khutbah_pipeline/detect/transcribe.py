@@ -1,91 +1,78 @@
 from collections import Counter
 from typing import Any, Callable, Optional
 
+from khutbah_pipeline.util.gpu import has_nvidia_gpu, can_load_cublas
 
-def _can_load_cublas() -> bool:
-    """Probe whether cuBLAS is actually loadable on this machine.
 
-    ctranslate2.get_supported_compute_types("cuda") only checks compile-time
-    support, not whether the runtime libs (libcublas, cuDNN) are installed.
-    On Linux/Windows the cuBLAS dlopen happens lazily inside ctranslate2
-    during the first matmul of model.transcribe(), which means a "cuda"
-    backend can be reported as supported and still blow up mid-inference
-    with `Library libcublas.so.12 is not found or cannot be loaded`.
+class CudaUnavailableError(RuntimeError):
+    """Raised when CUDA is requested (or auto-selected) but the runtime
+    can't actually use it. Carries an actionable message for the user."""
 
-    We dlopen/LoadLibrary the same name ctranslate2 will look for and
-    return False if the loader rejects it. CPU fallback is then chosen
-    proactively, which is much friendlier than failing on the user.
+
+def _resolve_device(prefer: str = "auto") -> tuple[str, str]:
+    """Resolve (device, compute_type) without silent CPU fallback.
+
+    `prefer` ∈ {"auto", "cuda", "cpu"}:
+      - "cpu":  always CPU. No probes.
+      - "cuda": CUDA or raise. Never CPU.
+      - "auto": CUDA if NVIDIA GPU + cuBLAS both present.
+                CPU silently if NO NVIDIA GPU.
+                RAISE if NVIDIA GPU present but cuBLAS missing — user
+                expected GPU acceleration; degrading silently is wrong.
     """
-    import ctypes
-    import platform
-    candidates: list[str]
-    system = platform.system()
-    if system == "Linux":
-        candidates = ["libcublas.so.12", "libcublas.so.11", "libcublas.so"]
-    elif system == "Windows":
-        candidates = ["cublas64_12.dll", "cublas64_11.dll"]
-    elif system == "Darwin":
-        # Apple Silicon / macOS — no NVIDIA CUDA. Caller already prefers CPU.
-        return False
-    else:
-        return False
-    for name in candidates:
-        try:
-            ctypes.CDLL(name)
-            return True
-        except OSError:
-            continue
-    return False
+    import ctranslate2  # type: ignore[import-untyped]
 
+    if prefer not in ("auto", "cuda", "cpu"):
+        raise ValueError(f"invalid device preference: {prefer!r}")
 
-def _detect_device_and_compute(prefer: str = "auto") -> tuple[str, str]:
-    """Detect best available device + compute type for faster-whisper.
-
-    Cross-platform / cross-vendor probe order (fastest → safest fallback):
-      1. CUDA float16        — NVIDIA Turing+ (GTX 16xx / RTX), ROCm-built CT2 on AMD
-      2. CUDA int8_float16   — older NVIDIA (Pascal-era) where pure FP16 is slow
-      3. CUDA int8           — last GPU resort
-      4. CPU int8            — Apple Silicon (Accelerate), x86 with AVX-VNNI
-      5. CPU float32         — universal fallback
-
-    ctranslate2 only ships "cuda" and "cpu" device strings. It has no Apple
-    Metal/MPS or Intel-GPU backend, so on Apple Silicon the fast path is CPU
-    int8 with the Accelerate framework — competitive with CUDA on small models.
-    AMD users running a ROCm-built ctranslate2 register their device as "cuda".
-
-    We also dlopen-probe cuBLAS upfront so machines that have an NVIDIA driver
-    but no CUDA toolkit installed (the common Linux case) skip straight to CPU
-    instead of failing mid-transcribe.
-
-    Returns (device, compute_type).
-    """
-    if prefer not in ("auto", "cpu", "cuda"):
-        prefer = "auto"
-
-    if prefer in ("auto", "cuda"):
-        try:
-            import ctranslate2  # type: ignore[import-untyped]
-            cuda_types = set(ctranslate2.get_supported_compute_types("cuda"))
-            # ct2 reports "cuda" as supported even when the runtime libs
-            # aren't installed. Confirm cuBLAS dlopens before committing.
-            if cuda_types and _can_load_cublas():
-                for compute in ("float16", "int8_float16", "int8"):
-                    if compute in cuda_types:
-                        return ("cuda", compute)
-        except Exception:
-            pass  # No GPU backend — ctranslate2 built without CUDA, no driver,
-                  # or no compatible GPU/cuDNN. Fall through to CPU.
-
-    try:
-        import ctranslate2  # type: ignore[import-untyped]
+    if prefer == "cpu":
         cpu_types = set(ctranslate2.get_supported_compute_types("cpu"))
-        for compute in ("int8", "float32"):
-            if compute in cpu_types:
-                return ("cpu", compute)
-    except Exception:
-        pass
+        for c in ("int8", "int8_float16", "float32"):
+            if c in cpu_types:
+                return ("cpu", c)
+        return ("cpu", "float32")
 
-    return ("cpu", "float32")
+    gpu_present = has_nvidia_gpu()
+    cublas_ok = can_load_cublas() if gpu_present else False
+
+    if prefer == "cuda":
+        if not gpu_present:
+            raise CudaUnavailableError(
+                "CUDA requested but no NVIDIA GPU detected (nvidia-smi failed). "
+                "Set Settings → Compute Device to CPU if your machine has no GPU."
+            )
+        if not cublas_ok:
+            raise CudaUnavailableError(
+                "CUDA requested but cuBLAS runtime libraries are not loadable on this machine. "
+                "Install the CUDA toolkit (Linux: 'apt install nvidia-cuda-toolkit'; "
+                "Windows: official CUDA installer at developer.nvidia.com/cuda-downloads), "
+                "or change Settings → Compute Device to CPU."
+            )
+
+    if prefer == "auto":
+        if not gpu_present:
+            cpu_types = set(ctranslate2.get_supported_compute_types("cpu"))
+            for c in ("int8", "int8_float16", "float32"):
+                if c in cpu_types:
+                    return ("cpu", c)
+            return ("cpu", "float32")
+        if not cublas_ok:
+            raise CudaUnavailableError(
+                "An NVIDIA GPU is present, but the CUDA runtime (cuBLAS) cannot be loaded. "
+                "Either install the CUDA toolkit so GPU acceleration works, "
+                "or change Settings → Compute Device to CPU to acknowledge CPU-only mode. "
+                "Auto mode refuses to silently fall back when a GPU is detected."
+            )
+
+    cuda_types = set(ctranslate2.get_supported_compute_types("cuda"))
+    for c in ("float16", "int8_float16", "int8"):
+        if c in cuda_types:
+            return ("cuda", c)
+    raise CudaUnavailableError(
+        "ctranslate2 has no usable CUDA compute type on this machine. "
+        "This usually means ctranslate2 was built without CUDA support — "
+        "reinstall with 'pip install ctranslate2 --force-reinstall'."
+    )
 
 
 def _transcribe_pass(
@@ -161,39 +148,15 @@ def transcribe_multilingual(
     compute_type: str = "auto",
     progress_cb: Optional[Callable[[dict[str, Any]], None]] = None,
 ) -> dict[str, Any]:
-    """Two-pass: detect language per chunk, then transcribe with locked language.
+    """Transcribe audio with explicit device handling and no silent fallback.
 
-    progress_cb receives dicts of shape:
-      {"stage": "transcribe", "message": str, "progress": float (0-1)}
-
-    Falls back to CPU if a CUDA attempt fails at any point — including lazy
-    library-load errors that don't surface until inference (e.g.
-    libcublas.so.12 missing on a system with the NVIDIA driver but no CUDA
-    toolkit installed).
+    `device` ∈ {"auto", "cuda", "cpu"}. CudaUnavailableError surfaces to the
+    caller with an actionable message — Electron main marshals it to the
+    renderer's toast.
     """
-    resolved_device, resolved_compute = (device, compute_type)
-    if device == "auto" or compute_type == "auto":
-        d_auto, c_auto = _detect_device_and_compute(device)
-        if device == "auto":
-            resolved_device = d_auto
-        if compute_type == "auto":
-            resolved_compute = c_auto
-
-    try:
-        return _transcribe_pass(
-            audio_path, model_dir, resolved_device, resolved_compute, progress_cb,
-        )
-    except Exception as e:
-        if resolved_device != "cuda":
-            raise
-        # CUDA load OR runtime failure (e.g. libcublas not found mid-inference).
-        # Retry on CPU so the user gets a result instead of a stack trace.
-        if progress_cb:
-            progress_cb({
-                "stage": "transcribe",
-                "message": f"GPU unavailable ({type(e).__name__}); switching to CPU…",
-                "progress": 0.0,
-            })
-        return _transcribe_pass(
-            audio_path, model_dir, "cpu", "int8", progress_cb,
-        )
+    resolved_device, resolved_compute = _resolve_device(device)
+    if compute_type != "auto":
+        resolved_compute = compute_type
+    return _transcribe_pass(
+        audio_path, model_dir, resolved_device, resolved_compute, progress_cb,
+    )

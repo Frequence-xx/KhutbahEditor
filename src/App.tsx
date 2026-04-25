@@ -3,6 +3,7 @@ import { TitleBar } from './components/TitleBar';
 import { Library } from './screens/Library';
 import { NewKhutbah } from './screens/NewKhutbah';
 import { Editor } from './screens/Editor';
+import { Processing } from './screens/Processing';
 import { Settings } from './screens/Settings';
 import { useProjects } from './store/projects';
 import { useIpcOnce } from './hooks/useIpc';
@@ -10,6 +11,7 @@ import { useIpcOnce } from './hooks/useIpc';
 type Screen =
   | { name: 'library' }
   | { name: 'new' }
+  | { name: 'processing'; projectId: string }
   | { name: 'editor'; projectId: string }
   | { name: 'settings' };
 
@@ -26,7 +28,7 @@ export default function App() {
       const probe = await window.khutbah.pipeline.call<{ duration: number }>('ingest.probe_local', { path });
       const id = path.replace(/[^a-z0-9]/gi, '_');
       addProject({ id, sourcePath: path, duration: probe.duration, createdAt: Date.now(), status: 'draft' });
-      setScreen({ name: 'editor', projectId: id });
+      setScreen({ name: 'processing', projectId: id });
     } catch (e: unknown) {
       // JSON-RPC errors come through with a `message` field
       const msg = e && typeof e === 'object' && 'message' in e ? String((e as { message: unknown }).message) : String(e);
@@ -60,6 +62,17 @@ export default function App() {
       )}
       {screen.name === 'new' && (
         <NewKhutbah onPickFile={pickAndCreate} onCancel={() => setScreen({ name: 'library' })} />
+      )}
+      {screen.name === 'processing' && (
+        <Processing
+          projectId={screen.projectId}
+          onDone={() => setScreen({ name: 'editor', projectId: screen.projectId })}
+          onError={(msg) => {
+            alert(msg);
+            // On detection failure, fall through to manual editor — boundaries unset
+            setScreen({ name: 'editor', projectId: screen.projectId });
+          }}
+        />
       )}
       {screen.name === 'editor' && (
         <Editor

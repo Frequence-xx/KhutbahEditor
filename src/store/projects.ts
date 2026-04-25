@@ -7,8 +7,22 @@ export type Project = {
   duration: number;
   createdAt: number;
   status: 'draft' | 'processed' | 'uploaded' | 'failed';
-  part1?: { start: number; end: number; outputPath?: string; videoId?: string };
-  part2?: { start: number; end: number; outputPath?: string; videoId?: string };
+  part1?: {
+    start: number;
+    end: number;
+    confidence?: number;
+    transcript?: string;
+    outputPath?: string;
+    videoId?: string;
+  };
+  part2?: {
+    start: number;
+    end: number;
+    confidence?: number;
+    transcript?: string;
+    outputPath?: string;
+    videoId?: string;
+  };
 };
 
 type State = {

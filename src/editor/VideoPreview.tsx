@@ -81,14 +81,11 @@ export const VideoPreview = forwardRef<VideoHandle, Props>(function VideoPreview
   }, [src]);
 
   return (
-    // Fill the column horizontally and cap height at ~280px so the
-    // timeline + export bar stay visible without scrolling. object-contain
-    // means letterbox/pillarbox bars instead of cropping, which is the
-    // right call for editing — frames stay accurately positioned.
-    <div
-      className="bg-black rounded-md relative border border-border-strong overflow-hidden w-full"
-      style={{ height: '280px' }}
-    >
+    // 16:9 aspect tied to the column width so the preview grows when the
+    // user drags the resize handle to widen the player column. object-contain
+    // letterboxes/pillarboxes for non-16:9 sources rather than cropping —
+    // the right call for editing where frame accuracy matters.
+    <div className="bg-black rounded-md relative border border-border-strong overflow-hidden w-full aspect-video">
       <video
         ref={videoRef}
         src={src}

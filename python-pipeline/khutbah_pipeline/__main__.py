@@ -60,6 +60,7 @@ def _smart_cut(
     target_lufs: float = -14.0,
     target_tp: float = -1.0,
     target_lra: float = 11.0,
+    notify: Optional[Callable[[dict[str, Any]], None]] = None,
 ) -> dict[str, str]:
     smart_cut(
         src, dst, start, end,
@@ -67,6 +68,7 @@ def _smart_cut(
         target_lufs=target_lufs,
         target_tp=target_tp,
         target_lra=target_lra,
+        progress_cb=notify,
     )
     return {"output": dst}
 

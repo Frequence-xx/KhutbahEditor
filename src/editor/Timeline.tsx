@@ -203,7 +203,19 @@ export function Timeline({
         )}
 
         <div className="ml-auto flex items-center gap-2 text-text-muted text-xs">
-          <span>Set marker from playhead:</span>
+          <button
+            onClick={() => {
+              setMarker('p1End', currentTime);
+              setMarker('p2Start', currentTime);
+            }}
+            disabled={currentTime <= markers.p1Start || currentTime >= markers.p2End}
+            title="Set P1 OUT and P2 IN to the playhead — splits Part 1 / Part 2 here"
+            className="px-2 h-7 rounded border border-amber bg-amber/15 text-amber text-[10px] font-bold uppercase tracking-wider hover:bg-amber/25 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            ✂ Split
+          </button>
+          <span className="text-text-dim">|</span>
+          <span>Set marker:</span>
           {(['p1Start', 'p1End', 'p2Start', 'p2End'] as MarkerKey[]).map((k) => (
             <button
               key={k}
@@ -270,91 +282,119 @@ export function Timeline({
         </span>
       </div>
 
-      <div className="overflow-auto khutbah-scrollbar pb-2 max-h-80">
+      <div className="overflow-auto khutbah-scrollbar pb-2 max-h-96">
         <div
           ref={trackRef}
           onClick={onTrackClick}
-          style={{ width: trackWidth, height: `${80 * vZoom}px` }}
-          className="relative bg-bg-1 border border-border-strong rounded-md cursor-pointer"
+          style={{ width: trackWidth }}
+          className="relative cursor-pointer"
         >
-          {ticks.map((t) => (
-            <div
-              key={t}
-              className="absolute top-0 bottom-0 border-l border-border-strong/40"
-              style={{ left: `${pctOf(t)}%` }}
-            >
-              <span className="absolute top-0.5 left-1 text-text-dim text-[9px] font-mono">
-                {fmtTime(t)}
-              </span>
-            </div>
-          ))}
-          {waveform && waveform.length > 0 && (
-            <svg
-              viewBox={`0 0 ${waveform.length} 100`}
-              preserveAspectRatio="none"
-              className="absolute inset-0 w-full h-full pointer-events-none"
-              aria-hidden
-            >
-              {waveform.map((p, i) => {
-                // Normalised 0..100 — the SVG stretches to fill the (now
-                // taller) track via preserveAspectRatio=none, so the bars
-                // get bigger as the user raises the Track zoom slider.
-                const h = Math.min(100, p * 100);
-                return (
-                  <line
-                    key={i}
-                    x1={i + 0.5}
-                    x2={i + 0.5}
-                    y1={50 - h / 2}
-                    y2={50 + h / 2}
-                    stroke="rgb(245 233 200 / 0.5)"
-                    strokeWidth={1}
-                  />
-                );
-              })}
-            </svg>
-          )}
-          <div
-            className="absolute top-0 h-full bg-amber/40 border border-amber rounded"
-            style={{ left: `${pctOf(markers.p1Start)}%`, width: `${part1Width}%` }}
-          >
-            <span className="absolute top-1/2 -translate-y-1/2 left-2 text-bg-3 text-xs font-bold">Part 1</span>
+          {/* Ruler row — timestamps + tick marks. Always-clickable for seek. */}
+          <div className="relative h-5 bg-bg-2 border border-border-strong rounded-t">
+            {ticks.map((t) => (
+              <div
+                key={t}
+                className="absolute top-0 bottom-0 border-l border-border-strong/50"
+                style={{ left: `${pctOf(t)}%` }}
+              >
+                <span className="absolute top-0.5 left-1 text-text-dim text-[9px] font-mono">
+                  {fmtTime(t)}
+                </span>
+              </div>
+            ))}
           </div>
+          {/* Segments lane — Part 1 / Part 2 boxes + draggable markers. */}
           <div
-            className="absolute top-0 h-full bg-green/40 border border-green rounded"
-            style={{ left: `${pctOf(markers.p2Start)}%`, width: `${part2Width}%` }}
+            className="relative bg-bg-1 border-x border-b border-border-strong"
+            style={{ height: `${44 * vZoom}px` }}
           >
-            <span className="absolute top-1/2 -translate-y-1/2 left-2 text-bg-3 text-xs font-bold">Part 2</span>
-          </div>
-          {(['p1Start', 'p1End', 'p2Start', 'p2End'] as MarkerKey[]).map((key) => (
+            {ticks.map((t) => (
+              <div
+                key={`seg-tick-${t}`}
+                className="absolute top-0 bottom-0 border-l border-border-strong/30"
+                style={{ left: `${pctOf(t)}%` }}
+                aria-hidden
+              />
+            ))}
             <div
-              key={key}
-              onMouseDown={(e) => onMarkerMouseDown(e, key)}
-              className="absolute -top-1 -bottom-1 w-1 cursor-ew-resize"
-              style={{ left: `${pctOf(markers[key])}%` }}
-              title={`${MARKER_LABELS[key]} — ${fmtTime(markers[key])}`}
+              className="absolute top-0 h-full bg-amber/40 border border-amber rounded"
+              style={{ left: `${pctOf(markers.p1Start)}%`, width: `${part1Width}%` }}
             >
-              <div className={`absolute -left-1.5 -top-0.5 w-3 h-3 rounded-sm border-2 border-bg-3 ${COLORS[key]}`} />
+              <span className="absolute top-1/2 -translate-y-1/2 left-2 text-bg-3 text-xs font-bold">Part 1</span>
             </div>
-          ))}
+            <div
+              className="absolute top-0 h-full bg-green/40 border border-green rounded"
+              style={{ left: `${pctOf(markers.p2Start)}%`, width: `${part2Width}%` }}
+            >
+              <span className="absolute top-1/2 -translate-y-1/2 left-2 text-bg-3 text-xs font-bold">Part 2</span>
+            </div>
+            {(['p1Start', 'p1End', 'p2Start', 'p2End'] as MarkerKey[]).map((key) => (
+              <div
+                key={key}
+                onMouseDown={(e) => onMarkerMouseDown(e, key)}
+                className="absolute -top-1 -bottom-1 w-1 cursor-ew-resize z-10"
+                style={{ left: `${pctOf(markers[key])}%` }}
+                title={`${MARKER_LABELS[key]} — ${fmtTime(markers[key])}`}
+              >
+                <div className={`absolute -left-1.5 -top-0.5 w-3 h-3 rounded-sm border-2 border-bg-3 ${COLORS[key]}`} />
+              </div>
+            ))}
+          </div>
+          {/* Audio lane — waveform-only, separate from segments so the
+              wave is readable independently of where the part boxes sit. */}
           <div
-            className="absolute -top-2 -bottom-2 w-px bg-amber pointer-events-none"
+            className="relative bg-bg-0 border-x border-b border-border-strong rounded-b"
+            style={{ height: `${36 * vZoom}px` }}
+          >
+            <span className="absolute top-1 left-2 text-text-dim text-[9px] uppercase tracking-wider font-bold pointer-events-none">
+              Audio
+            </span>
+            {waveform && waveform.length > 0 ? (
+              <svg
+                viewBox={`0 0 ${waveform.length} 100`}
+                preserveAspectRatio="none"
+                className="absolute inset-0 w-full h-full pointer-events-none"
+                aria-hidden
+              >
+                {waveform.map((p, i) => {
+                  const h = Math.min(100, p * 100);
+                  return (
+                    <line
+                      key={i}
+                      x1={i + 0.5}
+                      x2={i + 0.5}
+                      y1={50 - h / 2}
+                      y2={50 + h / 2}
+                      stroke="rgb(245 233 200 / 0.6)"
+                      strokeWidth={1}
+                    />
+                  );
+                })}
+              </svg>
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center text-text-dim text-[10px] pointer-events-none">
+                {waveformStatus === 'loading'
+                  ? 'Decoding audio…'
+                  : waveformStatus === 'failed'
+                    ? 'Audio track unavailable'
+                    : ''}
+              </div>
+            )}
+          </div>
+          {/* Playhead — spans ruler + segments + audio so the cursor reads
+              as one shared timeline position regardless of which lane the
+              user is looking at. */}
+          <div
+            className="absolute top-0 bottom-0 w-px bg-amber pointer-events-none"
             style={{ left: `${pctOf(currentTime)}%` }}
           >
-            {/* Time chip above the playhead — always visible so the user
-                always sees their scrub position. pointer-events-none on
-                the chip so it doesn't intercept drag. */}
-            <div className="absolute -top-7 left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-amber text-bg-3 text-[10px] font-mono rounded shadow-md whitespace-nowrap pointer-events-none">
+            <div className="absolute -top-1 left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-amber text-bg-3 text-[10px] font-mono rounded shadow-md whitespace-nowrap pointer-events-none">
               {fmtTime(currentTime)}
             </div>
-            {/* Diamond grab-handle: pointer-events-auto so it's draggable;
-                the line itself stays click-through. Generous hit area via
-                a transparent square wrapper so the user doesn't need
-                pixel-perfect aim on the rotated 16px diamond. */}
             <div
               onMouseDown={onPlayheadMouseDown}
               onClick={(e) => e.stopPropagation()}
-              className="absolute -top-3 -left-2.5 w-5 h-5 cursor-ew-resize pointer-events-auto"
+              className="absolute top-3 -left-2.5 w-5 h-5 cursor-ew-resize pointer-events-auto"
               title="Drag to scrub"
             >
               <div className="absolute top-0.5 left-0.5 w-4 h-4 rotate-45 bg-amber border border-bg-3" />

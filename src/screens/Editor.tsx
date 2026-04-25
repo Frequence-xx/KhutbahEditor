@@ -1,14 +1,30 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, MouseEvent as ReactMouseEvent } from 'react';
 import { useProjects } from '../store/projects';
 import { VideoPreview, VideoHandle } from '../editor/VideoPreview';
 import { Button } from '../components/ui/Button';
 import { Timeline } from '../editor/Timeline';
-import { useMarkers } from '../editor/markersStore';
+import { useMarkers, MarkerKey } from '../editor/markersStore';
 import { ProgressBar } from '../components/ui/ProgressBar';
 import { useSettings } from '../store/settings';
 import { PartInspector } from '../editor/PartInspector';
 import { withETA, formatETA, type EnrichedProgress } from '../lib/eta';
 import { toKhutbahFileUrl } from '../lib/fileUrl';
+
+const MARKER_LABELS: Record<MarkerKey, string> = {
+  p1Start: 'P1 IN',
+  p1End: 'P1 OUT',
+  p2Start: 'P2 IN',
+  p2End: 'P2 OUT',
+};
+
+function fmtTime(t: number): string {
+  const s = Math.max(0, t);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${sec.toFixed(2).padStart(5, '0')}`;
+  return `${m}:${sec.toFixed(2).padStart(5, '0')}`;
+}
 
 type Props = { projectId: string; onBack: () => void; onUpload: () => void };
 
@@ -45,6 +61,40 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
   const [waveformStatus, setWaveformStatus] = useState<'idle' | 'loading' | 'failed'>('idle');
   const settings = useSettings((s) => s.settings);
   const loadSettings = useSettings((s) => s.load);
+
+  // 3-column layout: player (resizable) | inspector | parts. Player defaults
+  // to 1/3 of the viewport so the user gets a roomy preview without it
+  // crowding out the inspector and parts panels. Drag the divider to grow
+  // the player when needed (and the inspector shrinks correspondingly).
+  const [playerPx, setPlayerPx] = useState<number>(() =>
+    Math.max(320, Math.floor(window.innerWidth / 3)),
+  );
+  function startResize(e: ReactMouseEvent): void {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = playerPx;
+    const onMove = (ev: globalThis.MouseEvent) => {
+      const next = startW + (ev.clientX - startX);
+      // Clamp: 320px min so the video has some room; leave at least 480px
+      // for the inspector + parts so the right side stays usable.
+      setPlayerPx(Math.max(320, Math.min(window.innerWidth - 480, next)));
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }
+
+  function splitAtPlayhead(): void {
+    setMarker('p1End', currentTime);
+    setMarker('p2Start', currentTime);
+  }
+  // Split is meaningful only when the playhead sits inside the union of
+  // the two parts — otherwise the operation either no-ops or violates
+  // marker ordering (p1End must be ≥ p1Start, p2Start ≤ p2End).
+  const canSplit = currentTime > markers.p1Start && currentTime < markers.p2End;
 
   useEffect(() => { loadSettings(); }, [loadSettings]);
 
@@ -220,23 +270,42 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
   }
 
   async function exportBoth(): Promise<void> {
-    if (!project || !window.khutbah || !settings) return;
+    if (!project || !window.khutbah) return;
     setExportError(null);
     setExporting({ p1: 0, p2: 0 });
+    let unsubscribe: (() => void) | null = null;
     try {
-      // Use user-configured output dir if set, else default
-      const dir = settings.outputDir ?? (await window.khutbah.paths.defaultOutputDir());
+      // Settings might still be loading — fall back to spec defaults so the
+      // export button works the moment the user lands on this screen.
+      const dir = settings?.outputDir ?? (await window.khutbah.paths.defaultOutputDir());
       await window.khutbah.paths.ensureDir(dir);
       const base = `${project.id}-${Date.now()}`;
       const p1Out = `${dir}/${base}-part-1.mp4`;
       const p2Out = `${dir}/${base}-part-2.mp4`;
-
       const audioParams = {
-        target_lufs: settings.audioTargetLufs,
-        target_tp: settings.audioTargetTp,
-        target_lra: settings.audioTargetLra,
+        target_lufs: settings?.audioTargetLufs ?? -14.0,
+        target_tp: settings?.audioTargetTp ?? -1.0,
+        target_lra: settings?.audioTargetLra ?? 11.0,
       };
 
+      // Live progress: smart_cut emits {stage: 'export', progress: 0..1}
+      // while ffmpeg encodes. Without this the user clicks Export and sees
+      // a static "Exporting…" label for 5+ minutes — exactly the "still in
+      // mock mode" feeling they reported.
+      let activePart: 'p1' | 'p2' = 'p1';
+      unsubscribe = window.khutbah.pipeline.onProgress((params) => {
+        if (params.stage !== 'export') return;
+        const p = typeof params.progress === 'number'
+          ? Math.max(0, Math.min(100, Math.round(params.progress * 100)))
+          : undefined;
+        if (p === undefined) return;
+        setExporting((prev) => ({
+          p1: activePart === 'p1' ? p : prev?.p1 ?? 0,
+          p2: activePart === 'p2' ? p : prev?.p2 ?? 0,
+        }));
+      });
+
+      activePart = 'p1';
       await window.khutbah.pipeline.call('edit.smart_cut', {
         src: project.sourcePath,
         dst: p1Out,
@@ -247,6 +316,7 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
       });
       setExporting({ p1: 100, p2: 0 });
 
+      activePart = 'p2';
       await window.khutbah.pipeline.call('edit.smart_cut', {
         src: project.sourcePath,
         dst: p2Out,
@@ -265,6 +335,8 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
       const msg = e && typeof e === 'object' && 'message' in e ? String((e as { message: unknown }).message) : String(e);
       setExportError(msg);
       setExporting(null);
+    } finally {
+      unsubscribe?.();
     }
   }
 
@@ -346,18 +418,20 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
           {detectionError}
         </div>
       )}
-      <div className="flex-1 p-6 grid grid-cols-[1fr_360px] gap-0">
-        <div className="bg-bg-0 p-4 rounded-l-lg border border-border-strong">
+      <div
+        className="flex-1 grid"
+        style={{ gridTemplateColumns: `${playerPx}px 6px 1fr 320px`, minHeight: 0 }}
+      >
+        {/* Player column — resizable via the divider on its right. */}
+        <div className="bg-bg-0 p-4 border-y border-l border-border-strong rounded-l-lg overflow-y-auto khutbah-scrollbar">
           <VideoPreview
             ref={videoRef}
             src={toKhutbahFileUrl(project.proxyPath ?? project.sourcePath)}
             onTimeUpdate={setCurrentTime}
             onPlayingChange={setIsPlaying}
           />
-          {/* Non-blocking proxy status — the source video plays right away;
-              once the proxy completes the src above swaps automatically and
-              this banner disappears, giving you fast scrubbing without
-              having had to wait for it. */}
+          {/* Non-blocking proxy banner — source plays right away; once the
+              proxy completes the src above swaps and this banner clears. */}
           {!proxyReady && !error && (
             <div className="mt-2 px-3 py-2 bg-bg-2 border border-border-strong rounded text-xs">
               <div className="flex items-center gap-2">
@@ -394,7 +468,111 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
           )}
           <div className="mt-3 text-text-muted text-xs font-mono">Time: {currentTime.toFixed(2)} s</div>
         </div>
-        <div className="bg-bg-2 p-4 rounded-r-lg border-y border-r border-border-strong overflow-y-auto">
+        {/* Drag handle — 6px wide vertical strip; cursor changes on hover so
+            it reads as resizable without needing extra chrome. */}
+        <div
+          onMouseDown={startResize}
+          className="border-y border-border-strong bg-bg-1 hover:bg-amber/40 cursor-ew-resize"
+          title="Drag to resize player"
+        />
+        {/* Inspector column — markers + split-at-playhead + detection summary. */}
+        <div className="bg-bg-2 px-4 py-3 border-y border-border-strong overflow-y-auto khutbah-scrollbar">
+          <h3 className="text-text-strong font-bold text-xs mb-2 uppercase tracking-wider">
+            Markers
+          </h3>
+          <div className="space-y-1.5 mb-4">
+            {(['p1Start', 'p1End', 'p2Start', 'p2End'] as MarkerKey[]).map((k) => {
+              const isP1 = k.startsWith('p1');
+              return (
+                <div
+                  key={k}
+                  className="flex items-center gap-2 px-2 py-1.5 bg-bg-3 border border-border-strong rounded"
+                >
+                  <span
+                    className={`w-2 h-2 rounded-full ${isP1 ? 'bg-amber' : 'bg-green'}`}
+                    aria-hidden
+                  />
+                  <span
+                    className={`font-bold text-[10px] uppercase tracking-wider ${
+                      isP1 ? 'text-amber' : 'text-green'
+                    }`}
+                  >
+                    {MARKER_LABELS[k]}
+                  </span>
+                  <span className="ml-auto font-mono text-text-strong text-xs">
+                    {fmtTime(markers[k])}
+                  </span>
+                  <button
+                    onClick={() => setMarker(k, currentTime)}
+                    title="Set to playhead"
+                    className="px-1.5 h-6 rounded border border-border-strong text-text-muted hover:text-text-strong hover:bg-bg-2 text-[11px]"
+                  >
+                    ⤓ here
+                  </button>
+                  <button
+                    onClick={() => videoRef.current?.seek(markers[k])}
+                    title="Jump to marker"
+                    className="px-1.5 h-6 rounded border border-border-strong text-text-muted hover:text-text-strong hover:bg-bg-2 text-[11px]"
+                  >
+                    ⏵ jump
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+
+          <h3 className="text-text-strong font-bold text-xs mb-2 uppercase tracking-wider">
+            Cut / Split
+          </h3>
+          <button
+            onClick={splitAtPlayhead}
+            disabled={!canSplit}
+            title={
+              canSplit
+                ? `Set P1 OUT and P2 IN to ${fmtTime(currentTime)}`
+                : 'Move the playhead inside the editing range first'
+            }
+            className="w-full px-3 py-2 bg-amber/15 border border-amber/60 text-amber rounded hover:bg-amber/25 disabled:opacity-40 disabled:cursor-not-allowed text-sm font-bold"
+          >
+            ✂ Split Part 1 → Part 2 here
+            <span className="block text-[10px] font-mono text-amber/80 mt-0.5">
+              {fmtTime(currentTime)}
+            </span>
+          </button>
+          <p className="mt-1 text-text-dim text-[11px] leading-snug">
+            Sets <span className="text-amber">P1 OUT</span> and{' '}
+            <span className="text-green">P2 IN</span> to the playhead — use this
+            to fix a missed sitting silence.
+          </p>
+
+          {project.part1 && project.part2 && (
+            <div className="mt-4 pt-3 border-t border-border-strong">
+              <h3 className="text-text-strong font-bold text-xs mb-2 uppercase tracking-wider">
+                Detection
+              </h3>
+              <div className="flex items-center gap-2 text-[11px] flex-wrap">
+                <span className="text-text-muted">P1 confidence</span>
+                <span
+                  className={`font-mono ${
+                    (project.part1.confidence ?? 0) >= 0.9 ? 'text-green' : 'text-amber'
+                  }`}
+                >
+                  {Math.round((project.part1.confidence ?? 0) * 100)}%
+                </span>
+                <span className="text-text-muted ml-2">P2 confidence</span>
+                <span
+                  className={`font-mono ${
+                    (project.part2.confidence ?? 0) >= 0.9 ? 'text-green' : 'text-amber'
+                  }`}
+                >
+                  {Math.round((project.part2.confidence ?? 0) * 100)}%
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+        {/* Parts column — original PartInspector with full transcripts. */}
+        <div className="bg-bg-2 p-4 border-y border-r border-border-strong rounded-r-lg overflow-y-auto khutbah-scrollbar">
           <PartInspector p1={project.part1} p2={project.part2} />
         </div>
       </div>
@@ -429,16 +607,16 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
           <Button
             variant="primary"
             onClick={exportBoth}
-            disabled={!!exporting || !settings || markers.p1End <= markers.p1Start || markers.p2End <= markers.p2Start}
+            disabled={!!exporting || markers.p1End <= markers.p1Start || markers.p2End <= markers.p2Start}
             title={
               markers.p1End <= markers.p1Start || markers.p2End <= markers.p2Start
-                ? 'Markers are at default positions — set Part 1 and Part 2 boundaries first'
-                : !settings
-                ? 'Settings still loading…'
-                : ''
+                ? 'Markers must form valid Part 1 and Part 2 ranges first'
+                : exporting
+                  ? 'Export in progress…'
+                  : 'Encode P1 and P2 to MP4 with EBU R128 loudness normalisation'
             }
           >
-            Export 2 files
+            {exporting ? 'Exporting…' : 'Export 2 files'}
           </Button>
           {project.part1?.outputPath && project.part2?.outputPath && (
             <Button variant="upload" onClick={onUpload}>

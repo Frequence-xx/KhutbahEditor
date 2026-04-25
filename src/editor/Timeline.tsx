@@ -48,6 +48,7 @@ export function Timeline({
   const { markers, duration, setMarker } = useMarkers();
   const trackRef = useRef<HTMLDivElement>(null);
   const dragging = useRef<MarkerKey | null>(null);
+  const scrubbing = useRef<boolean>(false);
   const [zoom, setZoom] = useState<number>(1);
   const [vZoom, setVZoom] = useState<number>(1);
 
@@ -56,10 +57,28 @@ export function Timeline({
   }
 
   function onTrackClick(e: MouseEvent<HTMLDivElement>): void {
-    if (dragging.current) return;
+    if (dragging.current || scrubbing.current) return;
     const rect = trackRef.current!.getBoundingClientRect();
     const t = ((e.clientX - rect.left) / rect.width) * duration;
     onSeek(t);
+  }
+
+  function onPlayheadMouseDown(e: MouseEvent): void {
+    e.stopPropagation();
+    scrubbing.current = true;
+    const onMove = (ev: globalThis.MouseEvent) => {
+      if (!trackRef.current) return;
+      const rect = trackRef.current.getBoundingClientRect();
+      const t = ((ev.clientX - rect.left) / rect.width) * duration;
+      onSeek(Math.max(0, Math.min(duration, t)));
+    };
+    const onUp = () => {
+      scrubbing.current = false;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
   }
 
   function onMarkerMouseDown(e: MouseEvent, key: MarkerKey): void {
@@ -316,7 +335,17 @@ export function Timeline({
             className="absolute -top-2 -bottom-2 w-px bg-amber pointer-events-none"
             style={{ left: `${pctOf(currentTime)}%` }}
           >
-            <div className="absolute -top-2 -left-1.5 w-3 h-3 rotate-45 bg-amber" />
+            {/* Diamond grab-handle: pointer-events-auto so it's draggable;
+                the line itself stays click-through. Generous hit area via
+                a transparent square wrapper so the user doesn't need
+                pixel-perfect aim on the rotated 12px diamond. */}
+            <div
+              onMouseDown={onPlayheadMouseDown}
+              className="absolute -top-3 -left-2.5 w-5 h-5 cursor-ew-resize pointer-events-auto"
+              title={`Playhead — ${fmtTime(currentTime)} (drag to scrub)`}
+            >
+              <div className="absolute top-0.5 left-0.5 w-4 h-4 rotate-45 bg-amber border border-bg-3" />
+            </div>
           </div>
         </div>
       </div>

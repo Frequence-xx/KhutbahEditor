@@ -346,7 +346,7 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
           {detectionError}
         </div>
       )}
-      <div className="flex-1 p-6 grid grid-cols-[1fr_280px] gap-0">
+      <div className="flex-1 p-6 grid grid-cols-[1fr_360px] gap-0">
         <div className="bg-bg-0 p-4 rounded-l-lg border border-border-strong">
           <VideoPreview
             ref={videoRef}
@@ -429,7 +429,14 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
           <Button
             variant="primary"
             onClick={exportBoth}
-            disabled={!proxyReady || !!exporting || !settings}
+            disabled={!!exporting || !settings || markers.p1End <= markers.p1Start || markers.p2End <= markers.p2Start}
+            title={
+              markers.p1End <= markers.p1Start || markers.p2End <= markers.p2Start
+                ? 'Markers are at default positions — set Part 1 and Part 2 boundaries first'
+                : !settings
+                ? 'Settings still loading…'
+                : ''
+            }
           >
             Export 2 files
           </Button>

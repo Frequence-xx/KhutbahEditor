@@ -73,9 +73,13 @@ export function Timeline({
       onSeek(Math.max(0, Math.min(duration, t)));
     };
     const onUp = () => {
-      scrubbing.current = false;
+      // Keep `scrubbing` true through the synthesised click that fires
+      // after mouseup; otherwise onTrackClick would seek again to wherever
+      // the cursor came to rest, which the user reads as the video
+      // "restarting" or jumping. Cleared on the next tick.
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
+      setTimeout(() => { scrubbing.current = false; }, 0);
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
@@ -90,9 +94,11 @@ export function Timeline({
       setMarker(key, t);
     };
     const onUp = () => {
-      dragging.current = null;
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
+      // Same pattern as the playhead scrub: keep dragging set through the
+      // click event that fires after mouseup so onTrackClick doesn't seek.
+      setTimeout(() => { dragging.current = null; }, 0);
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
@@ -222,13 +228,13 @@ export function Timeline({
           <input
             type="range"
             min={1}
-            max={10}
-            step={0.5}
+            max={200}
+            step={1}
             value={zoom}
             onChange={(e) => setZoom(parseFloat(e.target.value))}
-            className="w-32 accent-amber"
+            className="w-40 accent-amber"
           />
-          <span className="font-mono">{zoom.toFixed(1)}×</span>
+          <span className="font-mono">{zoom.toFixed(0)}×</span>
         </label>
         <label className="flex items-center gap-2">
           <span>Track</span>
@@ -335,14 +341,21 @@ export function Timeline({
             className="absolute -top-2 -bottom-2 w-px bg-amber pointer-events-none"
             style={{ left: `${pctOf(currentTime)}%` }}
           >
+            {/* Time chip above the playhead — always visible so the user
+                always sees their scrub position. pointer-events-none on
+                the chip so it doesn't intercept drag. */}
+            <div className="absolute -top-7 left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-amber text-bg-3 text-[10px] font-mono rounded shadow-md whitespace-nowrap pointer-events-none">
+              {fmtTime(currentTime)}
+            </div>
             {/* Diamond grab-handle: pointer-events-auto so it's draggable;
                 the line itself stays click-through. Generous hit area via
                 a transparent square wrapper so the user doesn't need
-                pixel-perfect aim on the rotated 12px diamond. */}
+                pixel-perfect aim on the rotated 16px diamond. */}
             <div
               onMouseDown={onPlayheadMouseDown}
+              onClick={(e) => e.stopPropagation()}
               className="absolute -top-3 -left-2.5 w-5 h-5 cursor-ew-resize pointer-events-auto"
-              title={`Playhead — ${fmtTime(currentTime)} (drag to scrub)`}
+              title="Drag to scrub"
             >
               <div className="absolute top-0.5 left-0.5 w-4 h-4 rotate-45 bg-amber border border-bg-3" />
             </div>

@@ -77,7 +77,7 @@ def smart_cut(
                 "message": f"Loudnorm pass 1 ({snap_duration:.0f}s)…",
                 "progress": 0.05,
             })
-        measured = measure_loudness(src, snap_start, snap_duration)
+        measured = measure_loudness(src, snap_start, snap_end)
         audio_filter = build_loudnorm_filter(measured, target_lufs, target_tp, target_lra)
 
     if progress_cb:

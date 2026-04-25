@@ -21,15 +21,30 @@ For each khutbah:
 
 ## Multi-account uploads
 
-Auto-pilot supports multi-account uploads — sign in with multiple YouTube channels (each new sign-in adds an account record), and auto-pilot will publish both parts to every account marked `autoPublish: true`.
+KhutbahEditor supports publishing the same khutbah to multiple YouTube channels in one workflow.
 
-For v1, the multi-account UI in Settings is simplified:
-- The Welcome / Sign-in flow adds the first account with `autoPublish: true`.
-- Subsequent accounts (added by signing in again with a different Google account) start with `autoPublish: false`.
-- To toggle auto-publish per account, edit `~/.config/KhutbahEditor/youtube-accounts.json` directly.
-- The manual Upload screen uploads to the first signed-in account only.
+### Adding accounts
 
-A Settings → Accounts UI panel with per-account configuration (auto-publish toggles, default playlists, metadata template overrides) ships in v1.1.
+In **Settings → Accounts**:
+- Click **+ Add account** to sign in with another Google account / channel.
+- Each account row shows the channel name + ID, an **auto-publish** toggle (include this account in auto-pilot uploads), a **default playlist** field (name or `PL…` ID), and a **Sign out** button.
+- The first account added has auto-publish ON by default; subsequent accounts default to OFF.
+
+### Auto-pilot
+
+Auto-pilot uploads to every account marked **auto-publish**. Per-account default playlists are resolved (or created, if missing and the global "Auto-create missing playlists" toggle is ON).
+
+### Manual upload
+
+The Upload screen shows account selector chips at the top — toggle which accounts to publish this khutbah to (defaults to your auto-publish set). Below, choose between:
+- **Shared metadata** (default) — one title/description/tags/visibility/thumbnail per part, applied to all selected accounts.
+- **Customize per account** — separate metadata + playlist per (account, part) pair, useful when one channel is Dutch-language and another is Arabic.
+
+Upload progress shows as a matrix: rows are Part 1 / Part 2, columns are each selected account, with a per-cell progress bar. A failure in one cell does not abort the others.
+
+### Per-account template overrides
+
+Each account row in Settings can override the global title/description/tags/visibility templates — useful for a Dutch-only channel that needs a Dutch-only description while another channel uses the global Arabic+Dutch template.
 
 ## Manual review
 

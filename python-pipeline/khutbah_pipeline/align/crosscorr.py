@@ -32,6 +32,29 @@ from khutbah_pipeline.util.ffmpeg import FFMPEG
 # by more than a few seconds.
 _DEFAULT_MAX_LAG_SEC: float = 5.0
 
+# Speech-band bandpass corners per spec §5.5.
+_BANDPASS_LOW_HZ: float = 200.0
+_BANDPASS_HIGH_HZ: float = 3400.0
+
+
+def _bandpass(signal: Any, sr: int) -> Any:
+    """Apply a 4th-order Butterworth bandpass (200-3400 Hz) per spec §5.5.
+
+    Deferred numpy/scipy imports so this module can be imported without them.
+    """
+    import numpy as np
+    import scipy.signal as ss  # type: ignore[import-untyped]
+
+    signal = np.asarray(signal, dtype=np.float64)
+    nyq = sr / 2.0
+    low = _BANDPASS_LOW_HZ / nyq
+    high = _BANDPASS_HIGH_HZ / nyq
+    # Clamp to valid range in case sr is very low in tests
+    low = max(low, 1e-6)
+    high = min(high, 1.0 - 1e-6)
+    b, a = ss.butter(4, [low, high], btype="band")
+    return ss.filtfilt(b, a, signal)
+
 
 def align_audio_arrays(
     sig: Any,
@@ -41,12 +64,17 @@ def align_audio_arrays(
 ) -> Tuple[float, float]:
     """Return (offset_seconds, confidence_ratio).
 
-    Positive offset means `sig` lags `ref` by that many seconds; negative
-    means `sig` leads `ref`.
+    Bandpass-filters BOTH inputs to the speech band (200-3400 Hz) per spec §5.5
+    to reject mains hum / rumble / out-of-speech-band noise that would weaken
+    the alignment peak in real lapel-vs-camera recordings.
 
-    Confidence is ``median_MSE / min_MSE`` — values above ~5.0 indicate a
-    clear single minimum; below ~5.0 the alignment is ambiguous and the user
-    should verify manually.
+    Uses FFT-accelerated MSE minimization rather than raw cross-correlation
+    argmax to avoid the overlap-length bias that affects short or strongly-
+    periodic signals.
+
+    Convention: positive offset = sig's content is delayed relative to ref
+    (sig file has extra content at start that doesn't appear in ref).
+    Confidence: peak / median(|score|); >5 indicates clear single minimum.
 
     Algorithm complexity: O(N log N) via FFT cross-correlation + O(N) prefix sums.
     """
@@ -55,6 +83,10 @@ def align_audio_arrays(
 
     sig = np.asarray(sig, dtype=np.float64)
     ref = np.asarray(ref, dtype=np.float64)
+
+    # Bandpass FIRST to suppress out-of-speech-band noise.
+    sig = _bandpass(sig, sr)
+    ref = _bandpass(ref, sr)
     N = min(len(sig), len(ref))
     sig = sig[:N]
     ref = ref[:N]

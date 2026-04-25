@@ -12,10 +12,11 @@ type Props = {
   onTimeUpdate?: (t: number) => void;
   onLoadedMetadata?: (duration: number) => void;
   onPlayingChange?: (playing: boolean) => void;
+  onMediaError?: (code: number) => void;
 };
 
 export const VideoPreview = forwardRef<VideoHandle, Props>(function VideoPreview(
-  { src, onTimeUpdate, onLoadedMetadata, onPlayingChange },
+  { src, onTimeUpdate, onLoadedMetadata, onPlayingChange, onMediaError },
   ref,
 ) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -135,17 +136,19 @@ export const VideoPreview = forwardRef<VideoHandle, Props>(function VideoPreview
     if (!v) return;
     const onError = () => {
       const err = v.error;
+      const code = err?.code ?? 0;
       const msg = err
-        ? `code=${err.code} (${
-            err.code === 1 ? 'aborted'
-            : err.code === 2 ? 'network'
-            : err.code === 3 ? 'decode'
-            : err.code === 4 ? 'src not supported'
+        ? `code=${code} (${
+            code === 1 ? 'aborted'
+            : code === 2 ? 'network'
+            : code === 3 ? 'decode'
+            : code === 4 ? 'src not supported'
             : 'unknown'
           })`
         : 'unknown';
       console.error('[video] error', { msg, src: v.currentSrc });
       setMediaError(msg);
+      onMediaError?.(code);
     };
     v.addEventListener('error', onError);
     return () => v.removeEventListener('error', onError);
@@ -161,10 +164,17 @@ export const VideoPreview = forwardRef<VideoHandle, Props>(function VideoPreview
         src={src}
         className="w-full h-full object-contain"
         controls
-        // preload="auto" makes the browser fetch enough buffer to seek
-        // accurately; the previous "metadata" was enough to render duration
-        // but caused later seeks to stall waiting for byte-range loads.
-        preload="auto"
+        preload="metadata"
+        onSeeking={(e) => {
+          const v = e.currentTarget;
+          console.log('[video] seeking', { currentTime: v.currentTime, readyState: v.readyState });
+        }}
+        onSeeked={(e) => {
+          const v = e.currentTarget;
+          console.log('[video] seeked', { currentTime: v.currentTime, readyState: v.readyState });
+        }}
+        onLoadStart={() => console.log('[video] loadstart', { src })}
+        onCanPlay={(e) => console.log('[video] canplay', { duration: e.currentTarget.duration, readyState: e.currentTarget.readyState })}
       />
       {mediaError && (
         <div className="absolute bottom-2 left-2 right-2 px-2 py-1 bg-danger/90 text-white text-[10px] font-mono rounded">

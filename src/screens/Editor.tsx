@@ -70,6 +70,19 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
   const [playerPx, setPlayerPx] = useState<number>(() =>
     Math.max(320, Math.floor(window.innerWidth / 3)),
   );
+
+  // When the proxy file is broken (decode error / unsupported codec — happens
+  // when an older proxy was generated before a sidecar fix, or aborted mid-
+  // write), the <video> element silently rejects every seek attempt and the
+  // user sees "click goes to t=0" forever. Detect via the <video> error event
+  // and fall back to the source file URL so seeks work while the new proxy
+  // regenerates in the background.
+  const [proxyBroken, setProxyBroken] = useState<boolean>(false);
+  useEffect(() => {
+    // Reset the override whenever we have a fresh proxyPath — that's the
+    // signal that proxy regeneration finished and we should try it again.
+    setProxyBroken(false);
+  }, [project?.proxyPath]);
   function startResize(e: ReactMouseEvent): void {
     e.preventDefault();
     const startX = e.clientX;
@@ -484,7 +497,9 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
         <div className="bg-bg-0 p-4 border-y border-l border-border-strong rounded-l-lg overflow-y-auto khutbah-scrollbar">
           <VideoPreview
             ref={videoRef}
-            src={toKhutbahFileUrl(project.proxyPath ?? project.sourcePath)}
+            src={toKhutbahFileUrl(
+              proxyBroken || !project.proxyPath ? project.sourcePath : project.proxyPath,
+            )}
             onTimeUpdate={setCurrentTime}
             onPlayingChange={setIsPlaying}
             onLoadedMetadata={(d) => {
@@ -493,6 +508,16 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
               // stored duration is missing/stale (older projects, partial
               // ingest, etc.) — the click-math multiplies by 0.
               if (d && d > 0) setDuration(d);
+            }}
+            onMediaError={(code) => {
+              // 3=decode, 4=unsupported. Either way the proxy is unusable for
+              // playback/seek. Fall back to the source so the editor keeps
+              // working while the new proxy bakes.
+              if (code === 3 || code === 4) {
+                console.warn('[editor] proxy unusable; falling back to source', { code });
+                setProxyBroken(true);
+                regenerateProxy();
+              }
             }}
           />
           {/* Non-blocking proxy banner — source plays right away; once the

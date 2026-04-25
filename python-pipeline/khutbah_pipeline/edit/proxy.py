@@ -30,8 +30,13 @@ def generate_proxy(
     cmd = [
         FFMPEG, "-y", "-i", src,
         "-vf", f"scale=-2:'min({max_height},ih)'",
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "26",
-        "-c:a", "aac", "-b:a", "96k",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+        "-pix_fmt", "yuv420p",            # 8-bit only — Chromium can't decode 10-bit H.264
+        "-profile:v", "baseline",          # max-compat decode path
+        "-level", "3.0",
+        "-g", "24", "-keyint_min", "24",   # keyframe every ~1 s @ 24 fps → fast scrub
+        "-sc_threshold", "0",              # disable scene-cut keyframes (keep cadence regular)
+        "-c:a", "aac", "-b:a", "96k", "-ar", "48000",
         "-movflags", "+faststart",
     ]
     if progress_cb:

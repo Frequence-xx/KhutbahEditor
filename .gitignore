@@ -16,7 +16,6 @@ venv/
 .pytest_cache/
 
 # Build artifacts
-build/
 out/
 *.tsbuildinfo
 
@@ -35,6 +34,9 @@ Thumbs.db
 # Bundled binaries (large, fetched in Phase 0 setup)
 resources/bin/
 resources/models/
+
+# electron-builder output
+release/
 
 # Logs
 *.log

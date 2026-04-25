@@ -18,6 +18,7 @@ venv/
 # Build artifacts
 build/
 out/
+*.tsbuildinfo
 
 # OS
 .DS_Store

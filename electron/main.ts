@@ -1,11 +1,14 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { SidecarManager } from './sidecar/manager.js';
+import { registerIpcHandlers } from './ipc/handlers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged;
 
 let mainWindow: BrowserWindow | null = null;
+let sidecar: SidecarManager | null = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -33,7 +36,27 @@ function createWindow() {
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(async () => {
+  sidecar = isDev
+    ? new SidecarManager({
+        pythonExecutable: path.resolve('python-pipeline/.venv/bin/python'),
+        moduleEntry: 'khutbah_pipeline',
+        cwd: path.resolve('python-pipeline'),
+      })
+    : new SidecarManager({
+        pythonExecutable: path.join(process.resourcesPath, 'python-pipeline/khutbah_pipeline'),
+        moduleEntry: 'khutbah_pipeline',
+        cwd: process.resourcesPath,
+      });
+  try {
+    await sidecar.start();
+  } catch (err) {
+    console.error('[main] failed to start sidecar:', err);
+    // Continue anyway so the window opens with a clearly-broken state, rather than the app silently dying.
+  }
+  registerIpcHandlers(sidecar);
+  createWindow();
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
@@ -43,4 +66,6 @@ app.on('activate', () => {
   if (mainWindow === null) createWindow();
 });
 
-ipcMain.handle('ping', () => ({ ok: true, ts: Date.now() }));
+app.on('before-quit', async () => {
+  await sidecar?.stop();
+});

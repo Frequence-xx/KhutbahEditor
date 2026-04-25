@@ -233,13 +233,21 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
     return () => window.clearInterval(id);
   }, [detectStartedAt]);
 
-  // Lazy-fetch the waveform once the source is known. Background task; on
-  // failure we surface waveformStatus='failed' so the user knows why the
-  // audio track didn't render. ~0.8s/5min on this machine.
+  // Stream-decode the waveform. The sidecar emits stage='waveform' events
+  // every ~30 buckets with the partial peaks array, so the audio lane fills
+  // in progressively (Premiere/DaVinci-style) instead of staring at an
+  // empty lane while a 1h source decodes for 8-15 seconds.
   useEffect(() => {
     if (!project || !window.khutbah || waveform) return;
     let cancelled = false;
     setWaveformStatus('loading');
+    const unsubscribe = window.khutbah.pipeline.onProgress((params) => {
+      if (cancelled || params.stage !== 'waveform') return;
+      const peaks = (params as { peaks?: number[] }).peaks;
+      if (Array.isArray(peaks) && peaks.length > 0) {
+        setWaveform(peaks);
+      }
+    });
     (async () => {
       try {
         const w = await window.khutbah!.pipeline.call<{ peaks: number[] }>(
@@ -257,6 +265,7 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
     })();
     return () => {
       cancelled = true;
+      unsubscribe();
     };
   }, [project?.sourcePath, waveform]);
 
@@ -429,6 +438,13 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
             src={toKhutbahFileUrl(project.proxyPath ?? project.sourcePath)}
             onTimeUpdate={setCurrentTime}
             onPlayingChange={setIsPlaying}
+            onLoadedMetadata={(d) => {
+              // Ground-truth duration from the actual <video> element. Without
+              // this, click-to-seek silently returns 0 whenever the project's
+              // stored duration is missing/stale (older projects, partial
+              // ingest, etc.) — the click-math multiplies by 0.
+              if (d && d > 0) setDuration(d);
+            }}
           />
           {/* Non-blocking proxy banner — source plays right away; once the
               proxy completes the src above swaps and this banner clears. */}

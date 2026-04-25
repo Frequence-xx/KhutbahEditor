@@ -37,8 +37,12 @@ def _mux(video_path: str, audio_path: str, offset_seconds: float, dst: str) -> d
     return {"path": dst}
 
 @register("edit.waveform")
-def _waveform(src: str, peaks_count: int = 1500) -> dict[str, Any]:
-    return compute_waveform(src, peaks_count=peaks_count)
+def _waveform(
+    src: str,
+    peaks_count: int = 1500,
+    notify: Optional[Callable[[dict[str, Any]], None]] = None,
+) -> dict[str, Any]:
+    return compute_waveform(src, peaks_count=peaks_count, progress_cb=notify)
 
 
 @register("edit.generate_proxy")

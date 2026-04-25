@@ -59,7 +59,7 @@ export function Processing({ projectId, onDone, onError }: Props) {
 
         if ('error' in result) {
           if (result.error === 'opening_not_found') {
-            onError('Could not find إن الحمد لله in this audio. Open the editor to mark Part 1 manually.');
+            onError('Could not find the opening phrase in this audio. Open the editor to mark Part 1 manually.');
             return;
           }
           if (result.error === 'sitting_silence_not_found') {

@@ -5,8 +5,8 @@ type Props = { p1?: Part; p2?: Part };
 export function PartInspector({ p1, p2 }: Props) {
   return (
     <div className="space-y-3">
-      <PartCard color="amber" label="الخطبة الأولى" data={p1} />
-      <PartCard color="green" label="الخطبة الثانية" data={p2} />
+      <PartCard color="amber" label="Khutbah Part 1" data={p1} />
+      <PartCard color="green" label="Khutbah Part 2" data={p2} />
     </div>
   );
 }

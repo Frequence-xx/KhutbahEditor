@@ -1,7 +1,7 @@
 export type TemplateVars = {
   date: string;          // YYYY-MM-DD
   n: number;             // 1 or 2
-  lang_suffix: string;   // " (Arabisch)" / " (Nederlands)" / ...
+  lang_suffix: string;   // " (Arabic)" / " (Dutch)" / " (English)"
   khatib: string;        // empty string if not set
   other_part_link: string;
 };
@@ -18,8 +18,8 @@ export function applyTemplate(template: string, vars: TemplateVars): string {
 
 export function langSuffix(lang: string): string {
   const map: Record<string, string> = {
-    ar: ' (Arabisch)',
-    nl: ' (Nederlands)',
+    ar: ' (Arabic)',
+    nl: ' (Dutch)',
     en: ' (English)',
   };
   return map[lang] ?? '';

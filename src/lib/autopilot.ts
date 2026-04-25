@@ -104,8 +104,8 @@ export async function runAutoPilot(
   const dir = settings.outputDir ?? (await window.khutbah.paths.defaultOutputDir());
   await window.khutbah.paths.ensureDir(dir);
   const base = `${project.id}-${Date.now()}`;
-  const p1Out = `${dir}/${base}-deel-1.mp4`;
-  const p2Out = `${dir}/${base}-deel-2.mp4`;
+  const p1Out = `${dir}/${base}-part-1.mp4`;
+  const p2Out = `${dir}/${base}-part-2.mp4`;
 
   const audioParams = {
     target_lufs: settings.audioTargetLufs,
@@ -220,7 +220,7 @@ export async function runAutoPilot(
           file_path: out,
           title: applyTemplate(titleTpl, vars),
           description: applyTemplate(descTpl, vars),
-          tags: [...tags, lang === 'ar' ? 'arabisch' : lang === 'nl' ? 'nederlands' : 'english'],
+          tags: [...tags, lang === 'ar' ? 'arabic' : lang === 'nl' ? 'dutch' : 'english'],
           category_id: settings.defaultCategoryId,
           privacy_status: visibility,
           self_declared_made_for_kids: settings.defaultMadeForKids,

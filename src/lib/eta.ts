@@ -21,7 +21,14 @@ export function withETA(prev: EnrichedProgress | null, next: ProgressUpdate): En
 }
 
 export function formatETA(seconds: number): string {
-  if (seconds < 60) return `${Math.round(seconds)}s`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
-  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+  const s = Math.max(0, Math.round(seconds));
+  if (s < 60) return `${s}s`;
+  if (s < 3600) {
+    const m = Math.floor(s / 60);
+    const rs = s % 60;
+    return rs === 0 ? `${m}m` : `${m}m ${rs}s`;
+  }
+  const h = Math.floor(s / 3600);
+  const rm = Math.floor((s % 3600) / 60);
+  return rm === 0 ? `${h}h` : `${h}h ${rm}m`;
 }

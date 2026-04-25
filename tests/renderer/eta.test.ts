@@ -56,5 +56,9 @@ describe('formatETA', () => {
   it('< 1 minute', () => expect(formatETA(45)).toBe('45s'));
   it('1-60 minutes', () => expect(formatETA(125)).toBe('2m 5s'));
   it('hours', () => expect(formatETA(7261)).toBe('2h 1m'));
-  it('exactly 60s rounds to 1m 0s', () => expect(formatETA(60)).toBe('1m 0s'));
+  it('exactly 60s collapses to 1m', () => expect(formatETA(60)).toBe('1m'));
+  it('whole minutes drop trailing 0s', () => expect(formatETA(120)).toBe('2m'));
+  it('whole hours drop trailing 0m', () => expect(formatETA(7200)).toBe('2h'));
+  it('rounds fractional seconds', () => expect(formatETA(64.6)).toBe('1m 5s'));
+  it('clamps negative input', () => expect(formatETA(-5)).toBe('0s'));
 });

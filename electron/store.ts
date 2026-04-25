@@ -31,13 +31,13 @@ export const defaults: AppSettings = {
   defaultMadeForKids: false,
   defaultCategoryId: '27',
   defaultTags: ['khutbah', 'friday', 'sermon', 'jumma', 'alhimmah'],
-  titleTemplate: 'Khutbah {date} — Deel {n}{lang_suffix}',
-  descriptionTemplate: `Vrijdagkhutbah van Al-Himmah Moskee, {date}.
+  titleTemplate: 'Khutbah {date} — Part {n}{lang_suffix}',
+  descriptionTemplate: `Friday khutbah from Al-Himmah Mosque, {date}.
 
-Deel {n}{lang_suffix}{khatib_line}
+Part {n}{lang_suffix}{khatib_line}
 {other_part_link}
 
-Bezoek ons: alhimmah.nl`,
+Visit us: alhimmah.nl`,
   khatibName: '',
   autoCreateMissingPlaylists: true,
 };

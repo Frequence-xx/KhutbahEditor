@@ -125,7 +125,7 @@ export function Upload({ projectId, onBack }: Props) {
             description: applyTemplate(settings.descriptionTemplate, vars),
             tags: [
               ...settings.defaultTags,
-              lang === 'ar' ? 'arabisch' : lang === 'nl' ? 'nederlands' : 'english',
+              lang === 'ar' ? 'arabic' : lang === 'nl' ? 'dutch' : 'english',
             ],
             visibility: settings.defaultVisibility,
             madeForKids: settings.defaultMadeForKids,
@@ -565,7 +565,7 @@ function PartFormCard({
   return (
     <div className="bg-bg-3 border border-border-strong rounded p-3 space-y-3">
       <div className="font-arabic text-text-strong" dir="rtl" lang="ar">
-        {partKey === 'p1' ? 'الخطبة الأولى' : 'الخطبة الثانية'}
+        {partKey === 'p1' ? 'Khutbah Part 1' : 'Khutbah Part 2'}
       </div>
       <input
         className="w-full bg-bg-0 border border-border-strong rounded p-2 text-text-strong text-sm font-semibold"

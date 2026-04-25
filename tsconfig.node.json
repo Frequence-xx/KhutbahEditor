@@ -1,13 +1,14 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "CommonJS",
+    "module": "ESNext",
     "moduleResolution": "node",
     "esModuleInterop": true,
     "strict": true,
     "outDir": "dist-electron",
+    "rootDir": "electron",
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["electron", "vite.config.ts"]
+  "include": ["electron"]
 }

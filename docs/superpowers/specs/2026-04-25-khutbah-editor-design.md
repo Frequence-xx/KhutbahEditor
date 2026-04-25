@@ -500,15 +500,46 @@ Each runner builds, packages, uploads to GitHub Release. No signing or notarizat
 - Watermarking
 - Web-based version
 
-## 11. Open questions for the user (to confirm during spec review)
+## 11. Defaults (configurable in Settings)
 
-1. **Khatib name** — should the upload metadata template have a default khatib name (e.g., "Imam X"), or always leave the `{khatib}` placeholder for manual fill?
-2. **Default visibility** — Public, Unlisted, or Private as the default for first-time users?
-3. **Output folder** — `~/Movies/KhutbahEditor/` (Mac), `~/Videos/KhutbahEditor/` (Windows/Linux) acceptable as default, or somewhere else?
-4. **First test khutbah** — `https://www.youtube.com/watch?v=whrEDiKurFU` is committed as the dogfood case for Phase 2 validation.
-5. **YouTube channel** — which channel will the OAuth-connected account upload to? (For testing Phase 3.)
-6. **Apple Silicon vs. Intel Mac priority** — both are built; do you have a preference for which to test first?
+These are the chosen defaults — all overridable in Settings, but the app ships with these out of the box:
 
-## 12. Repository
+| Setting | Default | Notes |
+|---------|---------|-------|
+| **Default visibility** | **Unlisted** | Safest first publish; user can flip to Public per-upload from the upload screen, or change the global default in Settings |
+| **Khatib name** | empty | Lives in Settings as a single text field; if set, fills the `{khatib}` placeholder in title/description templates. If empty, placeholder is silently dropped from output. Not auto-detected. |
+| **Output folder** | `~/Movies/KhutbahEditor/{YYYY-MM-DD}/` (macOS), `~/Videos/KhutbahEditor/{YYYY-MM-DD}/` (Windows + Linux) | Configurable. The dated subfolder ensures multiple runs on the same day don't overwrite each other. |
+| **Auto-pilot** | **ON** | Default behavior is paste URL / pick file → walk away → desktop notification when both parts are uploaded. Toggle in Settings to switch to "always open Editor for review". |
+| **Default category** | Education (YouTube category id 27) | Most appropriate for religious educational content |
+| **Default tags** | `khutbah, friday, sermon, jumma, alhimmah` (plus per-language: `arabisch`/`nederlands`/`english`) | Editable in template |
+| **Title template** | `Khutbah {date} — Deel {n}{lang_suffix}` where `{lang_suffix}` expands to ` (Arabisch)`, ` (Nederlands)`, ` (English)`, or empty if Part 2 dominant lang matches Part 1 | |
+| **Description template** | Multi-line (see Section 6.2 Upload screen mockup), includes cross-link to the other part's URL after both upload | Editable in Settings |
+| **Made-for-kids** | `false` (No) | Khutbahs are general adult religious content. COPPA-required field. |
+| **Whisper model** | `large-v3` (bundled, ~3 GB) | No alternative offered initially; Settings exposes a "model info" page only |
+| **Audio normalization** | -14 LUFS / -1 dBTP / 11 LU | YouTube standard. Configurable for users who upload to other platforms. |
+| **Silence threshold (sitting)** | 1.5 s @ -35 dBFS | Configurable in Advanced Settings |
+| **Min Part 1 duration** | 5 minutes | Sanity guard — silences before this don't count as the sitting moment |
 
-`git@github.com:Frequence-xx/KhutbahEditor.git` — to be initialized in Phase 0.
+## 12. Supported input formats
+
+**Video containers:** `.mp4`, `.mov`, `.mkv`, `.webm`, `.avi`, `.flv`, `.wmv` — anything FFmpeg can demux.
+
+**Audio-only files (for the audio-side of dual-file mode):** `.wav`, `.mp3`, `.m4a`, `.aac`, `.flac`, `.ogg`, `.opus`.
+
+**YouTube URLs:** any URL `yt-dlp` recognizes — full videos, shorts (technically supported but unlikely for khutbahs), unlisted videos (if user has access), playlist URLs are rejected (single video only).
+
+**Validation:** at ingest time, `ffprobe` confirms the file has at least one audio stream of usable length (≥ 30 s). Anything shorter or with no audio is rejected with a clear error.
+
+## 13. Test fixtures
+
+**First test khutbah** (committed for Phase 2 validation): `https://www.youtube.com/watch?v=whrEDiKurFU` — used as the canonical regression case for detection accuracy.
+
+## 14. Items the user should confirm during spec review
+
+- The defaults table in Section 11 looks right (especially: Unlisted as default visibility, ON as default auto-pilot, output folders)
+- The YouTube channel that Phase 3 OAuth will sign into for upload testing
+- The Frequence-xx Google Cloud project will be created and OAuth client credentials provisioned before Phase 3 begins (this is a one-time setup outside the app code)
+
+## 15. Repository
+
+`git@github.com:Frequence-xx/KhutbahEditor.git` — local working copy initialized in `/home/farouq/Development/alhimmah/`. Remote `origin` to be added in Phase 0 setup.

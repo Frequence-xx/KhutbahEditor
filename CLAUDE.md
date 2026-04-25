@@ -58,7 +58,7 @@ If something is genuinely correct or well-done, *describe what's good* concretel
 
 | Aspect | Details |
 |--------|---------|
-| **Stack** | Electron 30 + Vite 5 + React 18 + TypeScript 5 + Tailwind 3 + Python 3.11 + faster-whisper + FFmpeg + yt-dlp |
+| **Stack** | Electron 30 + Vite 5 + React 18 + TypeScript 5 + Tailwind 3 + Python 3.11 + silero-vad + faster-whisper tiny + FFmpeg + yt-dlp |
 | **Status** | Pre-implementation. Spec + plan committed. Phase 0 not started. |
 | **Languages handled** | Arabic (Part 1 always), Dutch + English (Part 2 sometimes) |
 | **i18n in UI** | English (interface), Arabic strings displayed as content |
@@ -113,7 +113,7 @@ bash resources/fetch-resources.sh "$(uname -s)" "$(uname -m | sed 's/x86_64/x64/
 
 ## Architecture (one-paragraph version)
 
-Three layers in one Electron app: **(1) Electron main process** — window management, native menus, file/dialog/notification handlers, OAuth loopback flow, OS-keychain refresh-token storage via `keytar`, supervises the Python sidecar lifecycle. **(2) React renderer** — Vite + TypeScript + Tailwind, single window, screens routed via local state, all heavy work delegated via `window.khutbah.pipeline.call(method, params)`. **(3) Python sidecar** — long-running child process started at app launch, JSON-RPC over stdio, modules: `ingest/` (yt-dlp + ffprobe), `align/` (FFT cross-correlation), `detect/` (faster-whisper + multilingual phrase library + silence detection), `edit/` (FFmpeg smart-cut + EBU R128 loudnorm + thumbnail extraction), `upload/` (YouTube Data API v3 with resumable uploads).
+Three layers in one Electron app: **(1) Electron main process** — window management, native menus, file/dialog/notification handlers, OAuth loopback flow, OS-keychain refresh-token storage via `keytar`, supervises the Python sidecar lifecycle. **(2) React renderer** — Vite + TypeScript + Tailwind, single window, screens routed via local state, all heavy work delegated via `window.khutbah.pipeline.call(method, params)`. **(3) Python sidecar** — long-running child process started at app launch, JSON-RPC over stdio, modules: `ingest/` (yt-dlp + ffprobe), `align/` (FFT cross-correlation), `detect/` (VAD-first pipeline_v2: silero-vad + ffmpeg scdet + ffmpeg silencedetect → candidate ranker → faster-whisper tiny on small windows + multilingual phrase library), `edit/` (FFmpeg smart-cut with stream-copy video + audio loudnorm re-encode, EBU R128 loudnorm, thumbnail extraction), `upload/` (YouTube Data API v3 with resumable uploads).
 
 Full architecture in `docs/superpowers/specs/2026-04-25-khutbah-editor-design.md`, sections 3 and 4.
 
@@ -123,7 +123,7 @@ Full architecture in `docs/superpowers/specs/2026-04-25-khutbah-editor-design.md
 
 | Decision | Choice |
 |----------|--------|
-| Speech recognition | Bundled `faster-whisper` `large-v3` (~3 GB), multilingual |
+| Speech recognition | Bundled `faster-whisper` `tiny` (~75 MB), multilingual; only used to confirm phrases on small ±5 s candidate windows. silero-vad does the speech/silence segmentation first. |
 | Stack | Electron + Vite + React + TypeScript + Tailwind + Python sidecar |
 | UI | "Dignified Dark" — `#0C1118`/`#1A2332` + amber `#E8B73C` + green `#7BA05B` |
 | Fonts | Cinzel (display) + Open Sans (body) + Amiri (Arabic) — all OFL/Apache 2.0 |
@@ -172,7 +172,7 @@ The Electron module is mocked in `tests/setup.ts`. If a test imports from `elect
 Install Windows Build Tools: `npm install --global windows-build-tools` (one-time, admin shell).
 
 **Whisper model not found in dev:**
-Run `bash resources/fetch-resources.sh` once. It downloads to `resources/models/whisper-large-v3/` (~3 GB, gitignored).
+Run `bash resources/fetch-resources.sh` once. It downloads to `resources/models/whisper-tiny/` (~75 MB, gitignored). The previous large-v3 model (3 GB) was retired on 2026-04-25 — the new VAD-first pipeline confirms phrases on small windows only.
 
 **Port 5173 in use:**
 ```bash

@@ -17,7 +17,7 @@ The app is built for the Al-Himmah Moskee (alhimmah.nl) and shares its visual id
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Speech recognition | Bundled local `faster-whisper` with `large-v3` model (~3 GB) | Maximum auto-pilot success; offline; covers Arabic + Dutch + English in one model |
+| Speech recognition | Bundled local `faster-whisper` with `tiny` model (~75 MB) on small candidate windows + silero-vad for speech/silence segmentation | Auto-pilot < 5 min on CPU; offline; large-v3 was retired 2026-04-25 because full-audio transcription took 25+ min and defeated the auto-pilot promise. See docs/superpowers/plans/2026-04-25-pipeline-speed-overhaul.md. |
 | Stack | Electron + Vite + React + TypeScript + Tailwind, with Python sidecar | Most mature cross-platform desktop stack, best fit for the modern UI requirement |
 | UI aesthetic | "Dignified Dark" — slate (`#2D3E50`/`#1A2332`) base with amber (`#E8B73C`) accents | Matches Al-Himmah palette; video-editor-native; calm and focused |
 | Typography | Cinzel (headings) + Open Sans (body) + Amiri (Arabic) — all OFL/Apache 2.0 | Cinzel substitutes for Trajan Pro (Adobe-licensed, can't bundle); Open Sans matches website; Amiri is the canonical free Arabic Naskh |

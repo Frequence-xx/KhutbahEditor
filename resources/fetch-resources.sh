@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # resources/fetch-resources.sh — fetches the bundled binaries (FFmpeg, ffprobe,
-# yt-dlp) per OS/arch and the Whisper large-v3 CTranslate2 model.
+# yt-dlp) per OS/arch and the Whisper tiny CTranslate2 model.
 #
 # Usage:
 #   bash resources/fetch-resources.sh "$(uname -s)" "$(uname -m | sed 's/x86_64/x64/')"
@@ -8,9 +8,9 @@
 # Skip the Whisper model download by setting:
 #   SKIP_WHISPER_MODEL=1 bash resources/fetch-resources.sh ...
 #
-# This is necessary in CI runners with limited bandwidth/disk; the model is
-# ~3 GB and only needed at runtime (loaded by faster-whisper) or in nightly
-# integration test runs.
+# The new VAD-first pipeline (Phase 3) only needs whisper-tiny (~75 MB) for
+# phrase confirmation on candidate windows. Boundary detection itself uses
+# silero-vad + ffmpeg scdet. The previous large-v3 (3 GB) is no longer used.
 
 set -euo pipefail
 OS=${1:-Linux}
@@ -73,19 +73,19 @@ case "$OS-$ARCH" in
     ;;
 esac
 
-# --- Whisper large-v3 (faster-whisper / CTranslate2 format) ---
-MODEL_PATH="$MODELS_DIR/whisper-large-v3"
+# --- Whisper tiny (faster-whisper / CTranslate2 format) ---
+MODEL_PATH="$MODELS_DIR/whisper-tiny"
 if [ "$SKIP_WHISPER_MODEL" = "1" ]; then
   echo "==> Skipping Whisper model download (SKIP_WHISPER_MODEL=1)"
 elif [ -d "$MODEL_PATH" ] && [ -f "$MODEL_PATH/model.bin" ]; then
   echo "==> Whisper model already present at $MODEL_PATH (skipping download)"
 else
-  echo "==> Downloading Whisper large-v3 (~3 GB)..."
+  echo "==> Downloading Whisper tiny (~75 MB)..."
   pip install --quiet huggingface_hub
   python3 -c "
 from huggingface_hub import snapshot_download
 snapshot_download(
-    repo_id='Systran/faster-whisper-large-v3',
+    repo_id='Systran/faster-whisper-tiny',
     local_dir='$MODEL_PATH',
 )
 "

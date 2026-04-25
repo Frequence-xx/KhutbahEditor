@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useSettings } from '../store/settings';
 import { Button } from '../components/ui/Button';
+import { AccountsSection } from './AccountsSection';
 
 type Props = { onBack: () => void };
 
@@ -20,12 +21,25 @@ export function Settings({ onBack }: Props) {
           <h2 className="font-display text-2xl tracking-wider text-text-strong">SETTINGS</h2>
         </div>
 
+        <Section title="Accounts">
+          <AccountsSection onError={(msg) => alert(msg)} />
+        </Section>
+
         <Section title="Workflow">
           <Toggle
             label="Auto-pilot"
             desc="Skip the editor for high-confidence detections; auto-export and upload"
             value={settings.autoPilot}
             onChange={(v) => patch({ autoPilot: v })}
+          />
+        </Section>
+
+        <Section title="Playlists">
+          <Toggle
+            label="Auto-create missing playlists"
+            desc="When uploading to an account whose configured playlist doesn't exist, create it automatically."
+            value={settings.autoCreateMissingPlaylists}
+            onChange={(v) => patch({ autoCreateMissingPlaylists: v })}
           />
         </Section>
 

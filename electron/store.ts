@@ -16,6 +16,7 @@ export type AppSettings = {
   titleTemplate: string;
   descriptionTemplate: string;
   khatibName: string;
+  autoCreateMissingPlaylists: boolean;
 };
 
 export const defaults: AppSettings = {
@@ -38,6 +39,7 @@ Deel {n}{lang_suffix}{khatib_line}
 
 Bezoek ons: alhimmah.nl`,
   khatibName: '',
+  autoCreateMissingPlaylists: true,
 };
 
 export const settingsStore = new Store<AppSettings>({ defaults });

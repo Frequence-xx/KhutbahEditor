@@ -237,7 +237,7 @@ export async function runAutoPilot(
               {
                 access_token: accessToken,
                 name_or_id: account.defaultPlaylistId ?? account.defaultPlaylistName,
-                auto_create: true,
+                auto_create: settings.autoCreateMissingPlaylists,
                 visibility: 'unlisted',
               },
             );

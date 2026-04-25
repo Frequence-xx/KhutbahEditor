@@ -10,6 +10,16 @@ import { PartInspector } from '../editor/PartInspector';
 
 type Props = { projectId: string; onBack: () => void; onUpload: () => void };
 
+type DetectionResult =
+  | {
+      duration: number;
+      part1: { start: number; end: number; confidence: number; transcript_at_start: string };
+      part2: { start: number; end: number; confidence: number; transcript_at_end: string };
+      lang_dominant: string;
+      overall_confidence: number;
+    }
+  | { error: string; duration?: number };
+
 export function Editor({ projectId, onBack, onUpload }: Props) {
   const project = useProjects((s) => s.projects.find((p) => p.id === projectId));
   const updateProject = useProjects((s) => s.update);
@@ -25,6 +35,8 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
   const markers = useMarkers((s) => s.markers);
   const [exporting, setExporting] = useState<{ p1: number; p2: number } | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [detecting, setDetecting] = useState<{ message: string; progress?: number } | null>(null);
+  const [detectionError, setDetectionError] = useState<string | null>(null);
   const settings = useSettings((s) => s.settings);
   const loadSettings = useSettings((s) => s.load);
 
@@ -93,6 +105,73 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
     };
   }, [project?.id, project?.proxyPath, project?.sourcePath, updateProject]);
 
+  async function runDetection(): Promise<void> {
+    if (!project || !window.khutbah) return;
+    setDetectionError(null);
+    setDetecting({ message: 'Detecting boundaries…' });
+    let unsubscribe: (() => void) | null = null;
+    try {
+      unsubscribe = window.khutbah.pipeline.onProgress((params) => {
+        if (params.stage === 'proxy') return;
+        setDetecting({
+          message: typeof params.message === 'string' ? params.message : 'Detecting…',
+          progress: typeof params.progress === 'number' ? Math.round(params.progress * 100) : undefined,
+        });
+      });
+      const result = await window.khutbah.pipeline.call<DetectionResult>(
+        'detect.run',
+        { audio_path: project.sourcePath },
+      );
+      if ('error' in result) {
+        setDetectionError(
+          result.error === 'opening_not_found'
+            ? 'Could not find the opening phrase. Mark Part 1 manually.'
+            : result.error === 'sitting_silence_not_found'
+              ? 'Could not detect a clear sitting silence. Mark boundaries manually.'
+              : `Detection failed: ${result.error}`,
+        );
+        return;
+      }
+      setDuration(result.duration);
+      setMarker('p2End', result.part2.end);
+      setMarker('p2Start', result.part2.start);
+      setMarker('p1End', result.part1.end);
+      setMarker('p1Start', result.part1.start);
+      updateProject(project.id, {
+        status: 'processed',
+        part1: {
+          start: result.part1.start,
+          end: result.part1.end,
+          confidence: result.part1.confidence,
+          transcript: result.part1.transcript_at_start,
+        },
+        part2: {
+          start: result.part2.start,
+          end: result.part2.end,
+          confidence: result.part2.confidence,
+          transcript: result.part2.transcript_at_end,
+        },
+      });
+    } catch (e: unknown) {
+      const msg = e && typeof e === 'object' && 'message' in e
+        ? String((e as { message: unknown }).message)
+        : String(e);
+      setDetectionError(msg);
+    } finally {
+      unsubscribe?.();
+      setDetecting(null);
+    }
+  }
+
+  function regenerateProxy(): void {
+    if (!project) return;
+    setError(null);
+    setProxyReady(false);
+    setProxyProgress({ message: 'Restarting preview proxy…' });
+    // Clearing proxyPath retriggers the proxy-generation useEffect.
+    updateProject(project.id, { proxyPath: undefined });
+  }
+
   async function exportBoth(): Promise<void> {
     if (!project || !window.khutbah || !settings) return;
     setExportError(null);
@@ -146,13 +225,74 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
 
   return (
     <div className="flex-1 flex flex-col">
-      <div className="px-6 py-3 border-b border-border-strong flex items-center gap-3">
+      <div className="px-6 py-3 border-b border-border-strong flex items-center gap-3 flex-wrap">
         <Button variant="ghost" onClick={onBack}>← Back</Button>
-        <span className="text-text-muted text-sm">{project.sourcePath.split('/').pop()}</span>
+        <span className="text-text-muted text-sm truncate max-w-md">
+          {project.sourcePath.split('/').pop()}
+        </span>
+        {project.part1 && project.part2 ? (
+          <span className="text-green text-xs flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-green" aria-hidden /> Boundaries detected
+            {typeof project.part1.confidence === 'number' && (
+              <span className="text-text-muted ml-1">
+                ({Math.round(project.part1.confidence * 100)}% / {Math.round((project.part2.confidence ?? 0) * 100)}%)
+              </span>
+            )}
+          </span>
+        ) : (
+          <span className="text-amber text-xs flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber" aria-hidden /> Boundaries not detected — markers are placeholders
+          </span>
+        )}
+        <div className="ml-auto flex items-center gap-2">
+          <Button
+            variant="ghost"
+            onClick={runDetection}
+            disabled={!!detecting}
+          >
+            {detecting ? '⟳ Detecting…' : project.part1 && project.part2 ? '↻ Re-run detection' : '⟳ Run detection'}
+          </Button>
+          {(error || (proxyReady && project.proxyPath)) && (
+            <Button variant="ghost" onClick={regenerateProxy} disabled={!!proxyProgress}>
+              ↻ Rebuild preview
+            </Button>
+          )}
+        </div>
       </div>
+      {detecting && (
+        <div className="px-6 py-2 bg-bg-2 border-b border-border-strong">
+          <div className="flex items-center gap-3">
+            <div className="w-2 h-2 rounded-full bg-amber animate-pulse" aria-hidden />
+            <span className="text-text-strong text-sm">{detecting.message}</span>
+            {detecting.progress !== undefined && (
+              <span className="ml-auto text-text-muted text-xs font-mono">{detecting.progress}%</span>
+            )}
+          </div>
+          <div className="h-1 mt-1 bg-border-strong rounded overflow-hidden">
+            {detecting.progress !== undefined ? (
+              <div
+                className="h-full bg-gradient-to-r from-amber to-amber-dark transition-all duration-300"
+                style={{ width: `${Math.max(0, Math.min(100, detecting.progress))}%` }}
+              />
+            ) : (
+              <div className="h-full bg-gradient-to-r from-transparent via-amber to-transparent animate-pulse" style={{ width: '40%' }} />
+            )}
+          </div>
+        </div>
+      )}
+      {detectionError && !detecting && (
+        <div className="px-6 py-2 bg-danger/10 border-b border-danger/40 text-danger text-sm">
+          {detectionError}
+        </div>
+      )}
       <div className="flex-1 p-6 grid grid-cols-[1fr_280px] gap-0">
         <div className="bg-bg-0 p-4 rounded-l-lg border border-border-strong">
-          {error && <div className="text-danger text-sm">Proxy generation failed: {error}</div>}
+          {error && (
+            <div className="space-y-2 py-12 px-4">
+              <div className="text-danger text-sm">Preview proxy failed: {error}</div>
+              <Button variant="ghost" onClick={regenerateProxy}>↻ Try again</Button>
+            </div>
+          )}
           {!proxyReady && !error && (
             <div className="space-y-2 py-12 px-4">
               <div className="flex items-center gap-3">
@@ -203,6 +343,7 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
           else videoRef.current?.play();
         }}
         isPlaying={isPlaying}
+        videoReady={proxyReady}
       />
       <div className="px-6 py-3 border-t border-border-strong flex items-center gap-3">
         {exportError && <span className="text-danger text-xs">{exportError}</span>}

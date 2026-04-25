@@ -6,6 +6,7 @@ type Props = {
   onSeek: (t: number) => void;
   onPlayPause: () => void;
   isPlaying: boolean;
+  videoReady: boolean;
 };
 
 const COLORS: Record<MarkerKey, string> = {
@@ -31,7 +32,7 @@ function fmtTime(t: number): string {
   return `${m}:${sec.toFixed(2).padStart(5, '0')}`;
 }
 
-export function Timeline({ currentTime, onSeek, onPlayPause, isPlaying }: Props) {
+export function Timeline({ currentTime, onSeek, onPlayPause, isPlaying, videoReady }: Props) {
   const { markers, duration, setMarker } = useMarkers();
   const trackRef = useRef<HTMLDivElement>(null);
   const dragging = useRef<MarkerKey | null>(null);
@@ -73,22 +74,27 @@ export function Timeline({ currentTime, onSeek, onPlayPause, isPlaying }: Props)
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
       switch (e.key) {
         case ' ':
+          if (!videoReady) return;
           e.preventDefault();
           onPlayPause();
           break;
         case 'j':
+          if (!videoReady) return;
           e.preventDefault();
           onSeek(Math.max(0, currentTime - 5));
           break;
         case 'l':
+          if (!videoReady) return;
           e.preventDefault();
           onSeek(Math.min(duration, currentTime + 5));
           break;
         case 'ArrowLeft':
+          if (!videoReady) return;
           e.preventDefault();
           onSeek(Math.max(0, currentTime - 0.1));
           break;
         case 'ArrowRight':
+          if (!videoReady) return;
           e.preventDefault();
           onSeek(Math.min(duration, currentTime + 0.1));
           break;
@@ -112,7 +118,7 @@ export function Timeline({ currentTime, onSeek, onPlayPause, isPlaying }: Props)
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [currentTime, duration, onSeek, onPlayPause, setMarker]);
+  }, [currentTime, duration, onSeek, onPlayPause, setMarker, videoReady]);
 
   const part1Width = pctOf(markers.p1End - markers.p1Start);
   const part2Width = pctOf(markers.p2End - markers.p2Start);
@@ -130,26 +136,33 @@ export function Timeline({ currentTime, onSeek, onPlayPause, isPlaying }: Props)
         <button
           onClick={onPlayPause}
           aria-label={isPlaying ? 'Pause' : 'Play'}
-          className="w-9 h-9 rounded-md bg-bg-2 border border-border-strong text-text-strong hover:bg-bg-3 flex items-center justify-center text-base"
+          disabled={!videoReady}
+          title={videoReady ? '' : 'Preview proxy not ready'}
+          className="w-9 h-9 rounded-md bg-bg-2 border border-border-strong text-text-strong hover:bg-bg-3 flex items-center justify-center text-base disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {isPlaying ? '⏸' : '▶'}
         </button>
         <button
           onClick={() => onSeek(Math.max(0, currentTime - 5))}
           aria-label="Back 5 seconds"
-          className="px-2 h-9 rounded-md bg-bg-2 border border-border-strong text-text-muted hover:text-text-strong text-xs font-mono"
+          disabled={!videoReady}
+          className="px-2 h-9 rounded-md bg-bg-2 border border-border-strong text-text-muted hover:text-text-strong text-xs font-mono disabled:opacity-40 disabled:cursor-not-allowed"
         >
           −5s
         </button>
         <button
           onClick={() => onSeek(Math.min(duration, currentTime + 5))}
           aria-label="Forward 5 seconds"
-          className="px-2 h-9 rounded-md bg-bg-2 border border-border-strong text-text-muted hover:text-text-strong text-xs font-mono"
+          disabled={!videoReady}
+          className="px-2 h-9 rounded-md bg-bg-2 border border-border-strong text-text-muted hover:text-text-strong text-xs font-mono disabled:opacity-40 disabled:cursor-not-allowed"
         >
           +5s
         </button>
         <span className="font-mono text-text-strong text-sm">{fmtTime(currentTime)}</span>
         <span className="text-text-muted text-xs">/ {fmtTime(duration)}</span>
+        {!videoReady && (
+          <span className="text-amber text-xs">· video preview not ready</span>
+        )}
 
         <div className="ml-auto flex items-center gap-2 text-text-muted text-xs">
           <span>Set marker from playhead:</span>

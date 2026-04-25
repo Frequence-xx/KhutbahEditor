@@ -34,6 +34,28 @@ export function Settings({ onBack }: Props) {
           />
         </Section>
 
+        <Section title="Performance">
+          <label className="flex flex-col gap-1">
+            <span className="text-sm text-text-strong">Compute device</span>
+            <select
+              className="bg-bg-elev border border-border-strong rounded px-2 py-1 text-sm"
+              value={settings.computeDevice}
+              onChange={(e) =>
+                patch({ computeDevice: e.target.value as 'auto' | 'cuda' | 'cpu' })
+              }
+            >
+              <option value="auto">Auto (use GPU when present)</option>
+              <option value="cuda">GPU (NVIDIA CUDA) — required</option>
+              <option value="cpu">CPU only</option>
+            </select>
+            <span className="text-xs text-text-muted">
+              Auto picks GPU when an NVIDIA card is detected. If a GPU is present but CUDA can't load,
+              detection refuses to start (rather than silently using CPU). Pick CPU here to acknowledge
+              CPU-only mode. Changes take effect on next app restart.
+            </span>
+          </label>
+        </Section>
+
         <Section title="Playlists">
           <Toggle
             label="Auto-create missing playlists"

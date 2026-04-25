@@ -53,6 +53,8 @@ Open the gear icon (top-right) to configure:
 
 - **"Sign-in expired" toast**: in Testing-mode OAuth (which KhutbahEditor v1 uses), Google's refresh tokens expire after 7 days. Re-authenticate in Settings → Accounts. v2 will move to Production-mode OAuth (long-lived refresh tokens) after Google's app verification process.
 
+- ```token_expired:401``` during a single upload: if your access token expires DURING a resumable upload (long videos on slow connections), the upload surfaces ```token_expired:401``` and stops. v1 does not transparently refresh mid-upload; v1.1 will. Workaround: retry the upload from the Library — auto-pilot fetches a fresh token at the start of each upload, and tokens are valid for 1 hour, so on a typical connection a single khutbah part fits within one token lifetime.
+
 - **"Detection confidence below 90%"**: detection failed on this khutbah. The Editor opens with markers pre-placed at sensible defaults — drag them to the right positions and click Upload manually.
 
 - **"App is not verified — only test users allowed"**: your Google account isn't on the OAuth consent screen's test-users list. Contact the app administrator (alhimmah.nl) to be added.

@@ -26,4 +26,6 @@ contextBridge.exposeInMainWorld('khutbah', {
     accessToken: (channelId: string) =>
       ipcRenderer.invoke('auth:accessToken', channelId),
   },
+  notify: (args: { title: string; body: string; clickUrl?: string }) =>
+    ipcRenderer.invoke('notify', args),
 });

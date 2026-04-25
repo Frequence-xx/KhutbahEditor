@@ -31,6 +31,7 @@ declare global {
         signOut: (channelId: string) => Promise<void>;
         accessToken: (channelId: string) => Promise<{ accessToken: string; expiresAt: number }>;
       };
+      notify: (args: { title: string; body: string; clickUrl?: string }) => Promise<void>;
     };
   }
 }

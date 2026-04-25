@@ -1,4 +1,4 @@
-import { ipcMain, dialog } from 'electron';
+import { ipcMain, dialog, Notification, shell } from 'electron';
 import os from 'os';
 import path from 'path';
 import fs from 'fs/promises';
@@ -53,4 +53,14 @@ export function registerIpcHandlers(sidecar: SidecarManager): void {
   );
   ipcMain.handle('auth:signOut', (_e, channelId: string) => signOutAccount(channelId));
   ipcMain.handle('auth:accessToken', (_e, channelId: string) => ensureAccessToken(channelId));
+  ipcMain.handle('notify', (_e, args: { title: string; body: string; clickUrl?: string }) => {
+    const n = new Notification({ title: args.title, body: args.body });
+    if (args.clickUrl) {
+      n.on('click', () => {
+        // Use shell.openExternal to route to system browser, not Electron child window.
+        shell.openExternal(args.clickUrl!);
+      });
+    }
+    n.show();
+  });
 }

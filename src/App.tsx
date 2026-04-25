@@ -49,11 +49,20 @@ export default function App() {
         const channelIds = Object.keys(result.uploads ?? {});
         const firstVideo = result.uploads?.[channelIds[0]]?.p1;
         const errors = Object.values(result.uploads ?? {}).flatMap((u) => u.errors);
+        const isPartial = result.mode === 'partial_failure';
+        const title = isPartial
+          ? 'KhutbahEditor — partial failure'
+          : 'KhutbahEditor — both parts uploaded';
         const body = errors.length > 0
-          ? `Some uploads had issues. ${errors.length} error(s) — open Library to see details.`
-          : `Both parts uploaded to ${channelIds.length} account(s).`;
-        // Phase 4 Task 4.2 will add OS-native notification here.
-        alert(`KhutbahEditor — ${result.mode === 'auto_complete' ? 'Done' : 'Partial failure'}\n\n${body}${firstVideo ? `\n\nhttps://youtube.com/watch?v=${firstVideo}` : ''}`);
+          ? `${errors.length} error(s); open Library for details.`
+          : `Uploaded to ${channelIds.length} account(s).`;
+        if (window.khutbah) {
+          window.khutbah.notify({
+            title,
+            body,
+            clickUrl: firstVideo ? `https://youtube.com/watch?v=${firstVideo}` : undefined,
+          });
+        }
         setScreen({ name: 'library' });
       }
     } catch (e: unknown) {

@@ -4,6 +4,7 @@ import { VideoPreview, VideoHandle } from '../editor/VideoPreview';
 import { Button } from '../components/ui/Button';
 import { Timeline } from '../editor/Timeline';
 import { useMarkers, MarkerKey } from '../editor/markersStore';
+import { useEditorShortcuts } from '../editor/useShortcuts';
 import { ProgressBar } from '../components/ui/ProgressBar';
 import { useSettings } from '../store/settings';
 import { PartInspector } from '../editor/PartInspector';
@@ -51,6 +52,7 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
   const setMarker = useMarkers((s) => s.setMarker);
   const setDuration = useMarkers((s) => s.setDuration);
   const markers = useMarkers((s) => s.markers);
+  const duration = useMarkers((s) => s.duration);
   const [exporting, setExporting] = useState<{ p1: number; p2: number } | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const [detecting, setDetecting] = useState<EnrichedProgress | null>(null);
@@ -99,6 +101,49 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
   // the two parts — otherwise the operation either no-ops or violates
   // marker ordering (p1End must be ≥ p1Start, p2Start ≤ p2End).
   const canSplit = currentTime > markers.p1Start && currentTime < markers.p2End;
+
+  // Keyboard shortcut handlers — rebuilt each render so closures always
+  // capture the latest state. The hook re-registers the listener on each
+  // render cycle (cheap — just remove + re-add one DOM listener).
+  useEditorShortcuts({
+    onPlayPause: () => {
+      if (isPlaying) videoRef.current?.pause();
+      else videoRef.current?.play();
+    },
+    onStepBack: () => {
+      const next = Math.max(0, currentTime - 1);
+      setCurrentTime(next);
+      videoRef.current?.seek(next);
+    },
+    onStepForward: () => {
+      const next = Math.min(duration, currentTime + 1);
+      setCurrentTime(next);
+      videoRef.current?.seek(next);
+    },
+    onStepBackFrame: () => {
+      const next = Math.max(0, currentTime - 1 / 24);
+      setCurrentTime(next);
+      videoRef.current?.seek(next);
+    },
+    onStepForwardFrame: () => {
+      const next = Math.min(duration, currentTime + 1 / 24);
+      setCurrentTime(next);
+      videoRef.current?.seek(next);
+    },
+    onSetIn: () => {
+      // Playhead before p2Start → adjust P1 IN; otherwise adjust P2 IN.
+      if (currentTime < markers.p2Start) setMarker('p1Start', currentTime);
+      else setMarker('p2Start', currentTime);
+    },
+    onSetOut: () => {
+      // Playhead before p2Start → adjust P1 OUT; otherwise adjust P2 OUT.
+      if (currentTime < markers.p2Start) setMarker('p1End', currentTime);
+      else setMarker('p2End', currentTime);
+    },
+    onSplit: () => {
+      if (canSplit) splitAtPlayhead();
+    },
+  });
 
   useEffect(() => { loadSettings(); }, [loadSettings]);
 
@@ -705,6 +750,13 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
         }}
         thumbs={thumbs}
       />
+      <div className="mt-2 px-6 text-xs text-text-secondary flex gap-3">
+        <span><kbd className="px-1 border border-border rounded">Space</kbd> play/pause</span>
+        <span><kbd className="px-1 border border-border rounded">J</kbd>/<kbd className="px-1 border border-border rounded">L</kbd> rew/fwd 1s</span>
+        <span><kbd className="px-1 border border-border rounded">⇧←</kbd>/<kbd className="px-1 border border-border rounded">⇧→</kbd> 1 frame</span>
+        <span><kbd className="px-1 border border-border rounded">I</kbd>/<kbd className="px-1 border border-border rounded">O</kbd> in/out</span>
+        <span><kbd className="px-1 border border-border rounded">S</kbd> split</span>
+      </div>
       <div className="px-6 py-3 border-t border-border-strong flex items-center gap-3">
         {exportError && <span className="text-danger text-xs">{exportError}</span>}
         {exporting && (

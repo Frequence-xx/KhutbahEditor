@@ -1,4 +1,4 @@
-import { ipcMain, dialog, Notification, shell } from 'electron';
+import { ipcMain, dialog, Notification, shell, BrowserWindow } from 'electron';
 import os from 'os';
 import path from 'path';
 import fs from 'fs/promises';
@@ -13,6 +13,17 @@ import {
 import { accounts as accountsStore, type YouTubeAccount } from '../auth/accounts.js';
 
 export function registerIpcHandlers(sidecar: SidecarManager): void {
+  // Forward sidecar progress notifications to all renderer webContents
+  sidecar.onNotification((method, params) => {
+    if (method === 'progress') {
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) {
+          win.webContents.send('pipeline:progress', params);
+        }
+      }
+    }
+  });
+
   ipcMain.handle('pipeline:call', async (_e, args: { method: string; params?: object }) => {
     try {
       return await sidecar.call(args.method, args.params);

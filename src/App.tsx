@@ -101,12 +101,33 @@ export default function App() {
 
   async function startFromYoutube(url: string): Promise<void> {
     if (!window.khutbah) return;
+    setAutoPilotProgress({ stage: 'detect', message: 'Probing YouTube URL…' });
+    let unsubscribe: (() => void) | null = null;
     try {
-      // Probe the URL first to populate duration / fail fast on invalid URLs
+      // Probe the URL first to populate duration / fail fast on invalid URLs.
+      // First call also triggers yt-dlp to fetch the EJS solver lib + solve
+      // YouTube's n-challenge — can take 10-30s on first run.
       const info = await window.khutbah.pipeline.call<{ duration: number; title: string; id: string }>(
         'ingest.youtube_info',
         { url },
       );
+      setAutoPilotProgress({
+        stage: 'detect',
+        message: `Downloading "${info.title.slice(0, 60)}"…`,
+        progress: 0,
+      });
+      // Subscribe to the sidecar's progress notifications during the download.
+      unsubscribe = window.khutbah.pipeline.onProgress((params) => {
+        if (params.stage === 'download' && typeof params.progress === 'number') {
+          setAutoPilotProgress({
+            stage: 'detect',
+            message: typeof params.message === 'string'
+              ? params.message
+              : `Downloading "${info.title.slice(0, 60)}"…`,
+            progress: Math.round(params.progress * 100),
+          });
+        }
+      });
       // Reserve an output dir for the download
       const dir = await window.khutbah.paths.defaultOutputDir();
       await window.khutbah.paths.ensureDir(dir);
@@ -114,6 +135,9 @@ export default function App() {
         'ingest.youtube_download',
         { url, output_dir: dir },
       );
+      unsubscribe?.();
+      unsubscribe = null;
+      setAutoPilotProgress({ stage: 'detect', message: 'Probing downloaded file…' });
       const id = url.replace(/[^a-z0-9]/gi, '_').slice(-32);
       addProject({
         id,
@@ -122,8 +146,11 @@ export default function App() {
         createdAt: Date.now(),
         status: 'draft',
       });
+      setAutoPilotProgress(null);
       await maybeAutoPilot(id);
     } catch (e: unknown) {
+      unsubscribe?.();
+      setAutoPilotProgress(null);
       const msg = e && typeof e === 'object' && 'message' in e
         ? String((e as { message: unknown }).message)
         : String(e);
@@ -284,15 +311,33 @@ export default function App() {
       )}
       {screen.name === 'settings' && <Settings onBack={() => setScreen({ name: 'library' })} />}
       {autoPilotProgress && (
-        <div className="fixed inset-0 bg-bg-0/80 flex items-center justify-center z-50">
-          <div className="bg-bg-2 border border-border-strong rounded-lg p-6 max-w-md w-full">
-            <h2 className="font-display text-xl tracking-wider text-text-strong mb-2">AUTO-PILOT</h2>
-            <p className="text-text-muted text-sm mb-4">{autoPilotProgress.message}</p>
-            {autoPilotProgress.progress !== undefined && (
-              <div className="h-1 bg-border-strong rounded overflow-hidden">
-                <div className="h-full bg-amber transition-all" style={{ width: `${autoPilotProgress.progress}%` }} />
-              </div>
-            )}
+        <div className="fixed inset-0 bg-bg-0/80 flex items-center justify-center z-50 backdrop-blur-sm">
+          <div className="bg-bg-2 border border-border-strong rounded-lg p-6 max-w-lg w-full shadow-2xl">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-2 h-2 rounded-full bg-amber animate-pulse" aria-hidden />
+              <h2 className="font-display text-xl tracking-wider text-text-strong">
+                {autoPilotProgress.stage === 'detect' && 'PROCESSING'}
+                {autoPilotProgress.stage === 'export' && 'EXPORTING'}
+                {autoPilotProgress.stage === 'upload' && 'UPLOADING'}
+                {autoPilotProgress.stage !== 'detect' && autoPilotProgress.stage !== 'export' && autoPilotProgress.stage !== 'upload' && 'WORKING'}
+              </h2>
+              {autoPilotProgress.progress !== undefined && (
+                <span className="ml-auto text-text-muted text-sm font-mono">
+                  {Math.round(autoPilotProgress.progress)}%
+                </span>
+              )}
+            </div>
+            <p className="text-text-dim text-sm mb-4 break-words">{autoPilotProgress.message}</p>
+            <div className="h-1.5 bg-border-strong rounded overflow-hidden">
+              {autoPilotProgress.progress !== undefined ? (
+                <div
+                  className="h-full bg-gradient-to-r from-amber to-amber-dark transition-all duration-300"
+                  style={{ width: `${Math.max(0, Math.min(100, autoPilotProgress.progress))}%` }}
+                />
+              ) : (
+                <div className="h-full bg-gradient-to-r from-transparent via-amber to-transparent animate-pulse" style={{ width: '40%' }} />
+              )}
+            </div>
           </div>
         </div>
       )}

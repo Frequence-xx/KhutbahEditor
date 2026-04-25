@@ -1,6 +1,6 @@
 """Entry point — starts the JSON-RPC server on stdin/stdout."""
 import os
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 from khutbah_pipeline.rpc import RpcServer, register
 from khutbah_pipeline.align.crosscorr import align_files
 from khutbah_pipeline.ingest.local import probe_local
@@ -71,8 +71,15 @@ def _yt_info(url: str) -> dict[str, Any]:
 
 
 @register("ingest.youtube_download")
-def _yt_dl(url: str, output_dir: str) -> dict[str, str]:
-    return {"path": download(url, output_dir)}
+def _yt_dl(
+    url: str,
+    output_dir: str,
+    notify: Callable[[dict[str, Any]], None] | None = None,
+) -> dict[str, str]:
+    def cb(payload: dict[str, Any]) -> None:
+        if notify:
+            notify(payload)
+    return {"path": download(url, output_dir, progress_cb=cb)}
 
 
 @register("detect.run")

@@ -1,4 +1,5 @@
 """Minimal JSON-RPC 2.0 server over a line-oriented stream (stdin/stdout)."""
+import inspect
 import json
 import sys
 import traceback
@@ -21,6 +22,11 @@ class RpcServer:
         self.out.write(json.dumps(payload) + "\n")
         self.out.flush()
 
+    def _notify(self, method: str, params: dict[str, Any]) -> None:
+        """Emit a JSON-RPC notification (no id field). Handlers use this
+        via the `notify` kwarg they declare in their signature."""
+        self._write({"jsonrpc": "2.0", "method": method, "params": params})
+
     def _handle(self, req: dict[str, Any]) -> dict[str, Any]:
         rid = req.get("id")
         method = req.get("method")
@@ -28,8 +34,17 @@ class RpcServer:
         if method not in _METHODS:
             return {"jsonrpc": "2.0", "id": rid,
                     "error": {"code": -32601, "message": f"Method not found: {method}"}}
+        handler = _METHODS[method]
         try:
-            result = _METHODS[method](**params) if isinstance(params, dict) else _METHODS[method](*params)
+            # If the handler's signature has a `notify` kwarg, inject our notifier.
+            sig = inspect.signature(handler)
+            kwargs = dict(params) if isinstance(params, dict) else {}
+            if 'notify' in sig.parameters:
+                kwargs['notify'] = lambda payload: self._notify('progress', {**payload, '_request_id': rid})
+            if isinstance(params, dict):
+                result = handler(**kwargs)
+            else:
+                result = handler(*params)
             return {"jsonrpc": "2.0", "id": rid, "result": result}
         except Exception as e:
             return {"jsonrpc": "2.0", "id": rid,

@@ -64,6 +64,23 @@ export async function runAutoPilot(
     throw new Error('Settings not loaded — auto-pilot requires settings.get to have completed');
   }
 
+  // Subscribe to sidecar progress notifications for the duration of this run.
+  // When smart_cut / transcribe emit progress in a future iteration, they'll
+  // flow through here automatically without further wiring in the caller.
+  let unsubscribeProgress: (() => void) | null = null;
+  if (window.khutbah) {
+    unsubscribeProgress = window.khutbah.pipeline.onProgress((params) => {
+      if (typeof params.stage === 'string' && typeof params.message === 'string') {
+        onProgress({
+          stage: params.stage as AutoPilotStage,
+          message: params.message,
+          progress: typeof params.progress === 'number' ? Math.round(params.progress * 100) : undefined,
+        });
+      }
+    });
+  }
+
+  try {
   // Stage 1: detection
   onProgress({ stage: 'detect', message: 'Detecting boundaries…', progress: 0 });
   const detection = await window.khutbah.pipeline.call<DetectionResult>(
@@ -306,4 +323,7 @@ export async function runAutoPilot(
   });
 
   return { mode: partialMode, detection, uploads };
+  } finally {
+    unsubscribeProgress?.();
+  }
 }

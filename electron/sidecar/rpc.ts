@@ -8,10 +8,18 @@ type RpcResponse = {
   error?: { code: number; message: string; data?: unknown };
 };
 
+type RpcNotification = {
+  jsonrpc: '2.0';
+  method: string;
+  params?: Record<string, unknown>;
+};
+
 type Pending = {
   resolve: (value: unknown) => void;
   reject: (error: unknown) => void;
 };
+
+type NotificationListener = (method: string, params: Record<string, unknown>) => void;
 
 function isRpcResponse(v: unknown): v is RpcResponse {
   if (typeof v !== 'object' || v === null) return false;
@@ -34,15 +42,27 @@ function isRpcResponse(v: unknown): v is RpcResponse {
   return true;
 }
 
+function isRpcNotification(v: unknown): v is RpcNotification {
+  if (typeof v !== 'object' || v === null) return false;
+  const r = v as Record<string, unknown>;
+  return r['jsonrpc'] === '2.0' && typeof r['method'] === 'string' && !('id' in r);
+}
+
 export class StdioRpc {
   private nextId = 1;
   private pending = new Map<number | string, Pending>();
   private rl: readline.Interface;
+  private notificationListeners = new Set<NotificationListener>();
 
   constructor(private stdin: Writable, stdout: Readable) {
     this.rl = readline.createInterface({ input: stdout, crlfDelay: Infinity });
     this.rl.on('line', (line) => this.handleLine(line));
     this.rl.on('close', () => this.failAll(new Error('Sidecar stdout closed')));
+  }
+
+  onNotification(listener: NotificationListener): () => void {
+    this.notificationListeners.add(listener);
+    return () => { this.notificationListeners.delete(listener); };
   }
 
   private handleLine(line: string): void {
@@ -52,6 +72,17 @@ export class StdioRpc {
       parsed = JSON.parse(line);
     } catch {
       process.stderr.write(`[sidecar][rpc] dropped malformed line (JSON parse error): ${line}\n`);
+      return;
+    }
+    if (isRpcNotification(parsed)) {
+      for (const listener of this.notificationListeners) {
+        try {
+          listener(parsed.method, parsed.params ?? {});
+        } catch (e) {
+          // never let one listener's exception break others
+          console.error('[rpc] notification listener threw:', e);
+        }
+      }
       return;
     }
     if (!isRpcResponse(parsed)) {

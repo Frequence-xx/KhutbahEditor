@@ -49,7 +49,7 @@ function setupKhutbahMock(opts: {
         defaultOutputDir: vi.fn(async () => '/tmp'),
         ensureDir: vi.fn(async (d: string) => d),
       },
-      pipeline: { call: ipcCall },
+      pipeline: { call: ipcCall, onProgress: vi.fn(() => () => undefined) },
       auth: {
         listAccounts: vi.fn(async () => opts.accounts),
         accessToken: vi.fn(async (channelId: string) => {

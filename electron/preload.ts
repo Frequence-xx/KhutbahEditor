@@ -5,6 +5,11 @@ contextBridge.exposeInMainWorld('khutbah', {
   pipeline: {
     call: <T = unknown>(method: string, params?: object): Promise<T> =>
       ipcRenderer.invoke('pipeline:call', { method, params }) as Promise<T>,
+    onProgress: (listener: (params: Record<string, unknown>) => void): (() => void) => {
+      const wrapped = (_event: unknown, params: Record<string, unknown>): void => listener(params);
+      ipcRenderer.on('pipeline:progress', wrapped);
+      return () => { ipcRenderer.off('pipeline:progress', wrapped); };
+    },
   },
   dialog: {
     openVideo: () => ipcRenderer.invoke('dialog:openVideo') as Promise<string | null>,

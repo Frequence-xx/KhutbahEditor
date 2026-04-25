@@ -77,6 +77,11 @@ export class SidecarManager {
     return this.rpc.call<T>(method, params);
   }
 
+  onNotification(listener: (method: string, params: Record<string, unknown>) => void): () => void {
+    if (!this.rpc) throw new Error('Sidecar not started');
+    return this.rpc.onNotification(listener);
+  }
+
   async stop(): Promise<void> {
     if (this.stopping) return this.stopping;
     this.stopping = this._stopImpl();

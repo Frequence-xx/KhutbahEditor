@@ -100,7 +100,15 @@ def download(
             try:
                 done_str, total_str = line.replace("download:", "").strip().split("/")
                 if progress_cb and total_str != "NA":
-                    progress_cb({"stage": "download", "progress": int(done_str) / int(total_str)})
+                    done = int(done_str)
+                    total = int(total_str)
+                    progress_cb({
+                        "stage": "download",
+                        "message": f"Downloading {done // (1024 * 1024)} / {total // (1024 * 1024)} MB",
+                        "progress": done / total,
+                        "current": done,
+                        "total": total,
+                    })
             except (ValueError, ZeroDivisionError):
                 pass
         if "[download] Destination:" in line:

@@ -7,7 +7,17 @@ declare global {
   interface Window {
     khutbah?: {
       ping: () => Promise<{ ok: boolean; ts: number }>;
-      pipeline: { call: <T = unknown>(method: string, params?: object) => Promise<T> };
+      pipeline: {
+        call: <T = unknown>(method: string, params?: object) => Promise<T>;
+        onProgress: (listener: (params: {
+          stage?: string;
+          message?: string;
+          progress?: number;     // 0-1
+          current?: number;      // bytes
+          total?: number;        // bytes
+          _request_id?: number;
+        }) => void) => () => void;
+      };
       dialog: {
         openVideo: () => Promise<string | null>;
         openAudio: () => Promise<string | null>;

@@ -9,6 +9,7 @@ export type AppSettings = {
   silenceMinDuration: number;
   minPart1Duration: number;
   autoPilot: boolean;
+  computeDevice: 'auto' | 'cuda' | 'cpu';
   defaultVisibility: 'public' | 'unlisted' | 'private';
   defaultMadeForKids: boolean;
   defaultCategoryId: string;
@@ -27,6 +28,7 @@ export const defaults: AppSettings = {
   silenceMinDuration: 1.5,
   minPart1Duration: 300,
   autoPilot: true,
+  computeDevice: 'auto',
   defaultVisibility: 'unlisted',
   defaultMadeForKids: false,
   defaultCategoryId: '27',

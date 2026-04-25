@@ -24,7 +24,10 @@ The app is built for the Al-Himmah Moskee (alhimmah.nl) and shares its visual id
 | Languages handled | Arabic, Dutch, English (Whisper multilingual) | Reflects khutbah reality: Part 1 usually Arabic; Part 2 often Dutch, sometimes Arabic, rarely English |
 | Audio normalization target | -14 LUFS integrated, -1 dBTP true peak (EBU R128, two-pass loudnorm) | YouTube standard — anything louder gets attenuated by their player |
 | Review UX | Auto-pilot first; Editor opens only when confidence < 90 %; markers draggable as safety net | "Manual work is extremely exceptional" |
-| YouTube auth | Shared Frequence-xx Google Cloud app credentials embedded in app, OAuth loopback flow | Smooth UX; pilot can serve up to 100 users unverified |
+| YouTube auth | Shared Frequence-xx Google Cloud app credentials embedded in app, OAuth loopback flow, **multi-account** (N signed-in YouTube channels per app installation) | Same khutbah often published to multiple Al-Himmah channels (e.g., NL-language and AR-language); refresh tokens stored per account in OS keychain |
+| Per-upload account selection | User picks one or more signed-in accounts per upload; auto-pilot uploads to all accounts marked "auto-publish" in Settings | Variable target set per khutbah; defaults configurable |
+| Per-account metadata override | Default: shared metadata (single title/description/thumbnail across selected accounts). Override: "Customize per account" toggle on upload screen splits metadata into one panel per account; per-account templates configurable in Settings | Account A might be NL-language, Account B AR-only — different descriptions wanted |
+| Playlist support | Per-account default playlist configurable in Settings; uploaded video auto-added to the playlist; if the playlist doesn't exist on that channel, auto-create it (toggleable) | "Vrijdagkhutbah 2026" on Channel A, "Friday Sermons 2026" on Channel B |
 | Audio↔video sync | Single-file (default) preserves sync via FFmpeg stream-copy; **dual-file mode** uses FFT cross-correlation to align separate audio + video before processing | Both single-source and lapel-mic-plus-camera workflows supported |
 | Code signing | **Not used.** App ships unsigned. Documented bypass instructions in README. | Zero infrastructure cost; acceptable for pilot |
 | Platforms | macOS (x64 + arm64 .dmg), Windows (x64 .exe NSIS), Linux (x64 .AppImage + .deb) | Cross-platform parity |
@@ -312,8 +315,8 @@ Then the rest of the pipeline treats `aligned.mp4` as a normal single-file sourc
 | **New Khutbah** (input) | Three tabs: paste YouTube URL · pick local file · dual-file (video + separate audio). Big drop-zone for files. |
 | **Processing** | Live stages with checkmarks (download → extract audio → detect language → transcribe → detect boundaries → cut + normalize → upload). Progress bar on the live stage. ETA. Cancel button. |
 | **Editor** | Opens only if confidence < 90 % or auto-pilot is OFF. Video preview (left), part inspector with transcript snippets and confidence bars (right), waveform timeline with draggable markers (bottom), action bar with primary "Upload to YouTube" CTA. |
-| **Upload** | Per-part metadata: title, description (multi-line, with cross-link to other part), thumbnail picker (5 auto-extracted scene-change frames + custom upload), tags, category (default Education), visibility (Public/Unlisted/Private), made-for-kids toggle (default OFF, COPPA-required). Live upload progress per part. Edits during upload apply via YouTube API. |
-| **Settings** | YouTube account (signed in as / sign out), default visibility, title/description/tag templates with placeholders (`{date}`, `{khatib}`, `{part_number}`, `{language}`), default thumbnail strategy (auto / first frame / etc.), default output folder, audio normalization target, auto-pilot toggle, model preferences |
+| **Upload** | **Multi-account aware:** top of screen lets user toggle which signed-in accounts to upload to (defaults to "auto-publish" set from Settings). Per-part metadata: title, description (with cross-link to other part), thumbnail picker (5 auto-extracted scene-change frames + custom upload), tags, category (default Education), visibility, made-for-kids toggle, **playlist field per account** (typed name with autocomplete from account's existing playlists, or "+ create new"). "Customize per account" toggle splits metadata into one panel per selected account. Progress matrix: rows = parts, columns = accounts. Edits during upload apply via YouTube API. |
+| **Settings** | **Accounts section** at top — list of signed-in YouTube channels with avatar, "Sign out" per account, "+ Add account" button, per-account default playlist (typed/picked), "Auto-publish" toggle, optional per-account title/description/tags/visibility template overrides. Below: title/description/tag templates with placeholders (`{date}`, `{khatib}`, `{part_number}`, `{language}`), default thumbnail strategy, default output folder, audio normalization target, auto-pilot toggle, "Auto-create missing playlists" toggle, model preferences. |
 
 ### 6.3 Key UX principles
 
@@ -324,6 +327,34 @@ Then the rest of the pipeline treats `aligned.mp4` as a normal single-file sourc
 - **OS-native completion notifications.** When auto-pilot finishes uploading, a system notification fires (so the user can paste a URL and walk away).
 
 ## 7. YouTube OAuth & upload
+
+### 7.0 Multi-account model
+
+The app maintains **N signed-in YouTube accounts** (typically 1-3 in practice). Each account is uniquely identified by its **YouTube channel ID** (not the Google account email — a single Google account can own multiple YouTube brand channels, and we treat each channel as a separate "account").
+
+**Account record (stored in `electron-store`):**
+```ts
+type YouTubeAccount = {
+  channelId: string;          // UCxxxxxx — primary key
+  channelTitle: string;       // "Al-Himmah NL"
+  thumbnailUrl: string;       // for UI avatar
+  signedInAt: number;
+  defaultPlaylistId?: string; // user's chosen playlist for this channel
+  autoPublish: boolean;       // included in auto-pilot uploads
+  titleTemplateOverride?: string;
+  descriptionTemplateOverride?: string;
+  tagsOverride?: string[];
+  defaultVisibilityOverride?: 'public' | 'unlisted' | 'private';
+};
+```
+
+Refresh tokens are stored separately, keyed by channel ID (`keytar` service `nl.alhimmah.khutbaheditor`, account `youtube-refresh-token:<channelId>`).
+
+**Sign-in flow extension:** after OAuth completes, call `youtube.channels.list?part=snippet&mine=true` with the access token, retrieve all channels owned by the Google account, and let the user pick which one(s) to add. Each picked channel becomes an account record. (Most users have one channel per Google account; brand-account holders may have several.)
+
+**Adding another account:** user clicks "+ Add account" in Settings → fresh OAuth loopback flow → repeat. Google's OAuth UI handles the account-switching prompt naturally.
+
+**Sign-out per account:** removes the account record from `electron-store` and the matching keychain entry.
 
 ### 7.1 OAuth 2.0 — desktop app, loopback redirect, PKCE
 
@@ -402,7 +433,85 @@ Field edits in the Upload screen are queued and applied when the upload complete
 - For Al-Himmah weekly khutbahs (~2 uploads/week) this is fine
 - For pilot at 100 users, may need quota raise (usually granted for legitimate use)
 
-### 7.7 Error matrix
+### 7.6.5 Multi-account upload orchestration
+
+For each part being published:
+
+1. Determine the target account set:
+   - Manual: user-selected accounts on the Upload screen
+   - Auto-pilot: every account with `autoPublish: true`
+2. For each `(part, account)` pair:
+   - Resolve effective metadata: shared metadata, with per-account overrides applied if present (override fields: `titleTemplateOverride`, `descriptionTemplateOverride`, `tagsOverride`, `defaultVisibilityOverride`)
+   - Apply title/description templates with the account-specific render context
+   - Resolve target playlist (see §7.7)
+   - Initiate resumable upload (§7.3)
+   - Set thumbnail (§7.4)
+   - Add to playlist (§7.7)
+3. Render per-pair progress in the UI as a matrix:
+   - Rows: Part 1, Part 2
+   - Columns: Account A, Account B, …
+   - Each cell shows progress bar + final video link
+
+**Failure isolation:** an upload failure in one `(part, account)` pair does not abort other pairs. Each runs independently; failures are surfaced per cell with retry option.
+
+### 7.7 Playlist management
+
+Each account record may carry a `defaultPlaylistId`. On upload:
+
+1. If `defaultPlaylistId` is set: use it directly.
+2. Else if the upload screen has a per-upload playlist override: use that.
+3. Else: skip playlist (video uploaded but not added to any playlist).
+
+**Playlist resolution at upload time** (Python sidecar):
+
+```python
+# python-pipeline/khutbah_pipeline/upload/playlists.py — sketch
+def resolve_or_create_playlist(access_token, channel_id, requested_name_or_id, *, auto_create=True, visibility='unlisted'):
+    """If requested_name_or_id looks like a playlist ID (starts with 'PL'), use directly.
+       Otherwise treat as a name: list user's playlists, find a match.
+       If no match and auto_create=True, create a new playlist on this channel."""
+    if requested_name_or_id.startswith('PL'):
+        return requested_name_or_id
+    # List existing
+    existing = list_playlists_for_channel(access_token)
+    match = next((p for p in existing if p['snippet']['title'].lower() == requested_name_or_id.lower()), None)
+    if match:
+        return match['id']
+    if not auto_create:
+        return None
+    return create_playlist(access_token, requested_name_or_id, visibility=visibility)
+```
+
+**Add to playlist:**
+```
+POST https://www.googleapis.com/youtube/v3/playlistItems?part=snippet
+{
+  "snippet": {
+    "playlistId": "PLxxxxxx",
+    "resourceId": { "kind": "youtube#video", "videoId": "<uploaded video id>" }
+  }
+}
+```
+
+**Quota cost:** `playlists.list` = 1 unit, `playlists.insert` = 50 units, `playlistItems.insert` = 50 units. Per upload total adds ~50-100 units on top of the 1700-unit upload — easily within the 10K/day quota.
+
+### 7.7.5 Settings screen extensions for multi-account + playlists
+
+In the **Accounts** section of Settings, each account row shows:
+
+```
+[avatar] Al-Himmah NL                                    [Sign out]
+         channel: UCxxxxx · signed in 2 weeks ago
+         Default playlist:  [Vrijdagkhutbah 2026 ▾]   [+ create new]
+         Auto-publish:      [✓]   include in auto-pilot uploads
+         Override metadata: [Configure templates →]   per-account title/desc/tags/visibility
+```
+
+Plus a global `[+ Add account]` button that triggers the multi-account OAuth flow.
+
+A global toggle: **Auto-create missing playlists** (default ON) — controls whether the app creates a playlist on a channel if the configured name doesn't exist there.
+
+### 7.8 Error matrix
 
 | Status | Action |
 |--------|--------|
@@ -515,6 +624,9 @@ These are the chosen defaults — all overridable in Settings, but the app ships
 | **Title template** | `Khutbah {date} — Deel {n}{lang_suffix}` where `{lang_suffix}` expands to ` (Arabisch)`, ` (Nederlands)`, ` (English)`, or empty if Part 2 dominant lang matches Part 1 | |
 | **Description template** | Multi-line (see Section 6.2 Upload screen mockup), includes cross-link to the other part's URL after both upload | Editable in Settings |
 | **Made-for-kids** | `false` (No) | Khutbahs are general adult religious content. COPPA-required field. |
+| **Auto-create missing playlists** | `true` | When a configured playlist name doesn't exist on a channel, create it automatically rather than failing the upload. Disable for stricter behavior. |
+| **Default account auto-publish flag** | `true` for the first account added, `false` for subsequently added accounts | Auto-pilot uploads to every account where this is `true`. Edit per-account in Settings → Accounts. |
+| **Per-upload "Customize per account" toggle default** | `OFF` (shared metadata) | Upload screen starts with one shared metadata form; user opts in to per-account override only when needed. |
 | **Whisper model** | `large-v3` (bundled, ~3 GB) | No alternative offered initially; Settings exposes a "model info" page only |
 | **Audio normalization** | -14 LUFS / -1 dBTP / 11 LU | YouTube standard. Configurable for users who upload to other platforms. |
 | **Silence threshold (sitting)** | 1.5 s @ -35 dBFS | Configurable in Advanced Settings |

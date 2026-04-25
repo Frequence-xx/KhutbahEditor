@@ -3873,46 +3873,102 @@ git add src/
 git commit -m "feat(ingest): YouTube URL input that downloads via yt-dlp"
 ```
 
-### Task 3.3: keytar OAuth token storage
+### Task 3.3: keytar multi-account OAuth token storage
+
+Per spec §7.0, the app stores N refresh tokens keyed by YouTube channel ID. A separate `electron-store` table holds the account records (channel metadata, default playlist, autoPublish flag, overrides).
 
 **Files:**
-- Create: `electron/auth/keychain.ts`
+- Create: `electron/auth/keychain.ts`, `electron/auth/accounts.ts`
 - Install: `keytar`
 
-- [ ] **Step 1: Install + implement**
+- [ ] **Step 1: Install**
 
 ```bash
 npm install keytar
 ```
+
+- [ ] **Step 2: Implement keychain wrapper (multi-token, keyed by channel ID)**
 
 ```ts
 // electron/auth/keychain.ts
 import keytar from 'keytar';
 
 const SERVICE = 'nl.alhimmah.khutbaheditor';
-const ACCOUNT = 'youtube-refresh-token';
+const PREFIX = 'youtube-refresh-token:';
 
 export const tokens = {
-  async getRefreshToken(): Promise<string | null> {
-    return keytar.getPassword(SERVICE, ACCOUNT);
+  async get(channelId: string): Promise<string | null> {
+    return keytar.getPassword(SERVICE, PREFIX + channelId);
   },
-  async setRefreshToken(token: string): Promise<void> {
-    await keytar.setPassword(SERVICE, ACCOUNT, token);
+  async set(channelId: string, token: string): Promise<void> {
+    await keytar.setPassword(SERVICE, PREFIX + channelId, token);
   },
-  async clear(): Promise<void> {
-    await keytar.deletePassword(SERVICE, ACCOUNT);
+  async clear(channelId: string): Promise<void> {
+    await keytar.deletePassword(SERVICE, PREFIX + channelId);
+  },
+  async listChannelIds(): Promise<string[]> {
+    const all = await keytar.findCredentials(SERVICE);
+    return all.filter((c) => c.account.startsWith(PREFIX)).map((c) => c.account.slice(PREFIX.length));
   },
 };
 ```
 
-- [ ] **Step 2: Commit**
+- [ ] **Step 3: Implement account record store**
+
+```ts
+// electron/auth/accounts.ts
+import Store from 'electron-store';
+
+export type YouTubeAccount = {
+  channelId: string;
+  channelTitle: string;
+  thumbnailUrl: string;
+  signedInAt: number;
+  defaultPlaylistId?: string;       // YouTube playlist ID, or undefined
+  defaultPlaylistName?: string;     // human label, persisted alongside the ID for the UI
+  autoPublish: boolean;
+  titleTemplateOverride?: string;
+  descriptionTemplateOverride?: string;
+  tagsOverride?: string[];
+  defaultVisibilityOverride?: 'public' | 'unlisted' | 'private';
+};
+
+const accountStore = new Store<{ accounts: YouTubeAccount[] }>({
+  name: 'youtube-accounts',
+  defaults: { accounts: [] },
+});
+
+export const accounts = {
+  list(): YouTubeAccount[] { return accountStore.get('accounts'); },
+  upsert(a: YouTubeAccount): void {
+    const all = accountStore.get('accounts').filter((x) => x.channelId !== a.channelId);
+    accountStore.set('accounts', [...all, a]);
+  },
+  remove(channelId: string): void {
+    accountStore.set('accounts', accountStore.get('accounts').filter((a) => a.channelId !== channelId));
+  },
+  patch(channelId: string, patch: Partial<YouTubeAccount>): YouTubeAccount | null {
+    const all = accountStore.get('accounts');
+    const idx = all.findIndex((a) => a.channelId === channelId);
+    if (idx < 0) return null;
+    const updated = { ...all[idx], ...patch };
+    all[idx] = updated;
+    accountStore.set('accounts', all);
+    return updated;
+  },
+};
+```
+
+- [ ] **Step 4: Commit**
 
 ```bash
 git add electron/ package.json package-lock.json
-git commit -m "feat(auth): keytar wrapper for OS keychain refresh-token storage"
+git commit -m "feat(auth): keytar multi-account refresh-token storage + account record store"
 ```
 
-### Task 3.4: OAuth loopback flow
+### Task 3.4: OAuth loopback flow (multi-account aware)
+
+Per spec §7.0/§7.1. Each sign-in pulls the YouTube channels for the authorized Google account, lets the user pick which channel(s) to add as accounts, and stores refresh tokens keyed by channel ID.
 
 **Files:**
 - Create: `electron/auth/youtube-oauth.ts`
@@ -3926,6 +3982,7 @@ import http from 'http';
 import crypto from 'crypto';
 import { URL } from 'url';
 import { tokens } from './keychain';
+import { accounts, YouTubeAccount } from './accounts';
 
 // Embedded — public client id is fine for desktop OAuth (no secret needed with PKCE)
 const CLIENT_ID = process.env.GOOGLE_OAUTH_CLIENT_ID || 'PLACEHOLDER_CLIENT_ID.apps.googleusercontent.com';
@@ -3940,7 +3997,7 @@ function pkce() {
   return { verifier, challenge };
 }
 
-export type OAuthTokens = { accessToken: string; expiresAt: number };
+export type OAuthTokens = { accessToken: string; expiresAt: number; addedAccounts?: YouTubeAccount[] };
 
 export async function signInWithGoogle(): Promise<OAuthTokens> {
   const { verifier, challenge } = pkce();
@@ -3994,13 +4051,36 @@ export async function signInWithGoogle(): Promise<OAuthTokens> {
   });
   if (!tokenRes.ok) throw new Error(`Token exchange failed: ${await tokenRes.text()}`);
   const t = await tokenRes.json();
-  await tokens.setRefreshToken(t.refresh_token);
-  return { accessToken: t.access_token, expiresAt: Date.now() + (t.expires_in - 60) * 1000 };
+
+  // MULTI-ACCOUNT: discover all channels owned by this Google account, store
+  // refresh token + account record per channel. (One Google account → N YouTube
+  // channels share the same OAuth grant; channelId is the account primary key.)
+  const channelsRes = await fetch(
+    'https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true',
+    { headers: { Authorization: `Bearer ${t.access_token}` } }
+  );
+  if (!channelsRes.ok) throw new Error(`Channel list failed: ${await channelsRes.text()}`);
+  const channels = (await channelsRes.json()).items || [];
+  const isFirstAccountEver = accounts.list().length === 0;
+  const added: YouTubeAccount[] = [];
+  for (const ch of channels) {
+    await tokens.set(ch.id, t.refresh_token);
+    const rec: YouTubeAccount = {
+      channelId: ch.id,
+      channelTitle: ch.snippet.title,
+      thumbnailUrl: ch.snippet.thumbnails?.default?.url ?? '',
+      signedInAt: Date.now(),
+      autoPublish: isFirstAccountEver,   // first account auto-publishes; subsequent opt-in
+    };
+    accounts.upsert(rec);
+    added.push(rec);
+  }
+  return { accessToken: t.access_token, expiresAt: Date.now() + (t.expires_in - 60) * 1000, addedAccounts: added };
 }
 
-export async function ensureAccessToken(): Promise<OAuthTokens> {
-  const refresh = await tokens.getRefreshToken();
-  if (!refresh) throw new Error('not_signed_in');
+export async function ensureAccessToken(channelId: string): Promise<OAuthTokens> {
+  const refresh = await tokens.get(channelId);
+  if (!refresh) throw new Error(`not_signed_in:${channelId}`);
   const r = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -4010,34 +4090,46 @@ export async function ensureAccessToken(): Promise<OAuthTokens> {
       refresh_token: refresh,
     }),
   });
-  if (!r.ok) throw new Error(`Refresh failed: ${await r.text()}`);
+  if (!r.ok) throw new Error(`Refresh failed for ${channelId}: ${await r.text()}`);
   const t = await r.json();
   return { accessToken: t.access_token, expiresAt: Date.now() + (t.expires_in - 60) * 1000 };
 }
 
-export async function signOut(): Promise<void> { await tokens.clear(); }
+export async function signOutAccount(channelId: string): Promise<void> {
+  await tokens.clear(channelId);
+  accounts.remove(channelId);
+}
+
+export function listAccounts(): YouTubeAccount[] {
+  return accounts.list();
+}
 ```
 
 - [ ] **Step 2: Wire IPC + preload**
 
 ```ts
 // electron/ipc/handlers.ts
-import { signInWithGoogle, ensureAccessToken, signOut } from '../auth/youtube-oauth';
-import { tokens } from '../auth/keychain';
+import { signInWithGoogle, ensureAccessToken, signOutAccount, listAccounts } from '../auth/youtube-oauth';
+import { accounts } from '../auth/accounts';
 
-ipcMain.handle('auth:signIn', () => signInWithGoogle());
-ipcMain.handle('auth:status', async () => ({ signedIn: !!(await tokens.getRefreshToken()) }));
-ipcMain.handle('auth:signOut', () => signOut());
-ipcMain.handle('auth:accessToken', () => ensureAccessToken());
+ipcMain.handle('auth:signIn', () => signInWithGoogle());                                          // adds N accounts (channels)
+ipcMain.handle('auth:listAccounts', () => listAccounts());                                        // returns YouTubeAccount[]
+ipcMain.handle('auth:patchAccount', (_e, channelId: string, patch: object) =>                     // edit per-account settings
+  accounts.patch(channelId, patch));
+ipcMain.handle('auth:signOut', (_e, channelId: string) => signOutAccount(channelId));             // sign out a single account
+ipcMain.handle('auth:accessToken', (_e, channelId: string) => ensureAccessToken(channelId));      // get fresh token for a specific account
 ```
 
 ```ts
-// preload.ts additions
+// preload.ts additions — multi-account aware
 auth: {
-  signIn: () => ipcRenderer.invoke('auth:signIn') as Promise<{ accessToken: string; expiresAt: number }>,
-  status: () => ipcRenderer.invoke('auth:status') as Promise<{ signedIn: boolean }>,
-  signOut: () => ipcRenderer.invoke('auth:signOut') as Promise<void>,
-  accessToken: () => ipcRenderer.invoke('auth:accessToken') as Promise<{ accessToken: string; expiresAt: number }>,
+  signIn: () => ipcRenderer.invoke('auth:signIn') as Promise<{ accessToken: string; expiresAt: number; addedAccounts: YouTubeAccount[] }>,
+  listAccounts: () => ipcRenderer.invoke('auth:listAccounts') as Promise<YouTubeAccount[]>,
+  patchAccount: (channelId: string, patch: Partial<YouTubeAccount>) =>
+    ipcRenderer.invoke('auth:patchAccount', channelId, patch) as Promise<YouTubeAccount | null>,
+  signOut: (channelId: string) => ipcRenderer.invoke('auth:signOut', channelId) as Promise<void>,
+  accessToken: (channelId: string) =>
+    ipcRenderer.invoke('auth:accessToken', channelId) as Promise<{ accessToken: string; expiresAt: number }>,
 },
 ```
 
@@ -4045,7 +4137,7 @@ auth: {
 
 ```bash
 git add electron/
-git commit -m "feat(auth): Google OAuth loopback flow with PKCE for YouTube scope"
+git commit -m "feat(auth): multi-account Google OAuth loopback flow with channel discovery"
 ```
 
 ### Task 3.5: YouTube API client + resumable upload
@@ -4201,9 +4293,101 @@ def _update(access_token: str, video_id: str, snippet: dict = None, status: dict
     return update_metadata(access_token, video_id, snippet, status)
 ```
 
+- [ ] **Step 3: Add playlist module + RPCs (per spec §7.7)**
+
+```python
+# python-pipeline/khutbah_pipeline/upload/playlists.py
+import json
+import urllib.request
+
+def list_playlists(access_token: str, page_token: str | None = None) -> list[dict]:
+    """Return all playlists owned by the authenticated user (paginates internally)."""
+    out: list[dict] = []
+    params = "part=snippet,contentDetails&mine=true&maxResults=50"
+    while True:
+        url = f"https://www.googleapis.com/youtube/v3/playlists?{params}"
+        if page_token:
+            url += f"&pageToken={page_token}"
+        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {access_token}"})
+        with urllib.request.urlopen(req) as r:
+            data = json.loads(r.read())
+        out.extend(data.get("items", []))
+        page_token = data.get("nextPageToken")
+        if not page_token:
+            return out
+
+def create_playlist(access_token: str, title: str, description: str = "", privacy: str = "unlisted") -> dict:
+    body = json.dumps({
+        "snippet": {"title": title[:150], "description": description[:5000]},
+        "status": {"privacyStatus": privacy},
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        "https://www.googleapis.com/youtube/v3/playlists?part=snippet,status",
+        data=body, method="POST",
+        headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req) as r:
+        return json.loads(r.read())
+
+def add_video_to_playlist(access_token: str, playlist_id: str, video_id: str) -> dict:
+    body = json.dumps({
+        "snippet": {
+            "playlistId": playlist_id,
+            "resourceId": {"kind": "youtube#video", "videoId": video_id},
+        }
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        "https://www.googleapis.com/youtube/v3/playlistItems?part=snippet",
+        data=body, method="POST",
+        headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req) as r:
+        return json.loads(r.read())
+
+def resolve_or_create_playlist(access_token: str, name_or_id: str | None,
+                                auto_create: bool = True, visibility: str = "unlisted") -> str | None:
+    """Spec §7.7: if name_or_id is a YouTube ID (starts with 'PL'), use directly.
+       Else lookup by name in the user's playlists; create if missing and auto_create."""
+    if not name_or_id:
+        return None
+    if name_or_id.startswith("PL"):
+        return name_or_id
+    existing = list_playlists(access_token)
+    match = next((p for p in existing if p["snippet"]["title"].lower() == name_or_id.lower()), None)
+    if match:
+        return match["id"]
+    if not auto_create:
+        return None
+    return create_playlist(access_token, name_or_id, visibility=visibility)["id"]
+```
+
+Register the RPCs in `__main__.py`:
+```python
+from khutbah_pipeline.upload.playlists import (
+    list_playlists, create_playlist, add_video_to_playlist, resolve_or_create_playlist
+)
+
+@register("playlists.list")
+def _list(access_token: str): return list_playlists(access_token)
+
+@register("playlists.create")
+def _create(access_token: str, title: str, description: str = "", privacy: str = "unlisted"):
+    return create_playlist(access_token, title, description, privacy)
+
+@register("playlists.add_video")
+def _add(access_token: str, playlist_id: str, video_id: str):
+    return add_video_to_playlist(access_token, playlist_id, video_id)
+
+@register("playlists.resolve_or_create")
+def _resolve(access_token: str, name_or_id: str | None, auto_create: bool = True, visibility: str = "unlisted"):
+    return {"playlist_id": resolve_or_create_playlist(access_token, name_or_id, auto_create, visibility)}
+```
+
+- [ ] **Step 4: Commit**
+
 ```bash
 git add python-pipeline/
-git commit -m "feat(upload): YouTube resumable upload + thumbnail + metadata edit RPCs"
+git commit -m "feat(upload): YouTube resumable upload + thumbnail + playlist + metadata RPCs"
 ```
 
 ### Task 3.6: Thumbnail extraction
@@ -4250,10 +4434,20 @@ git add python-pipeline/
 git commit -m "feat(edit): scene-change thumbnail extraction"
 ```
 
-### Task 3.7: Upload screen with metadata + thumbnail picker
+### Task 3.7: Upload screen — multi-account, per-part metadata, per-account playlist
+
+**Multi-account requirements** (per spec §6.2 "Upload" + §7.6.5 + §7.7):
+
+- Top of screen: **account selector chips** — one per signed-in account (`useEffect` on mount calls `window.khutbah.auth.listAccounts()`). Each chip is a checkbox, default-checked for accounts with `autoPublish: true`. User can toggle in/out.
+- Below that: **"Customize per account" toggle** (default OFF). When OFF: one shared metadata form for both parts. When ON: metadata form is duplicated per selected account so titles/descriptions/tags/visibility/playlist can differ per (account, part).
+- Each (selected account) row in the form includes a **playlist field**: text input with autocomplete from `playlists.list` for that account; defaults to the account's `defaultPlaylistName` from Settings; "+ create new" inline if name doesn't match an existing playlist.
+- Thumbnail picker stays as before but applies to all selected accounts (per-account thumbnails not in v1; PR welcome later).
+- **Upload progress matrix**: rows = parts (1, 2), columns = selected accounts. Each cell shows progress bar + final video link. Failures isolated per cell (one failed upload doesn't abort others).
+
+**Implementation outline** (the existing single-account code in this task stays as a reference for the per-cell upload action; wrap it in two nested loops over `selectedAccounts` × `parts`):
 
 **Files:**
-- Create: `src/screens/Upload.tsx`, `src/upload/ThumbnailPicker.tsx`, `src/upload/MetadataForm.tsx`, `src/lib/templates.ts`
+- Create: `src/screens/Upload.tsx`, `src/upload/ThumbnailPicker.tsx`, `src/upload/MetadataForm.tsx`, `src/upload/AccountSelector.tsx`, `src/upload/PlaylistField.tsx`, `src/upload/UploadMatrix.tsx`, `src/lib/templates.ts`
 
 - [ ] **Step 1: Template engine**
 
@@ -4506,7 +4700,25 @@ git tag phase-3-complete
 
 Goal: Settings-driven auto-pilot end-to-end (URL → notification with two YouTube links). Dual-file mode for separate audio/video alignment.
 
-### Task 4.1: Auto-pilot orchestrator
+### Task 4.1: Auto-pilot orchestrator (multi-account aware)
+
+**Multi-account orchestration** (per spec §7.6.5):
+
+After detection passes confidence ≥ 90 % and parts are exported, the orchestrator must:
+
+1. Load `accounts = await window.khutbah.auth.listAccounts()`
+2. Filter to `targets = accounts.filter(a => a.autoPublish)`
+3. For each `(part, account)` pair (2 parts × N targets):
+   - Resolve effective metadata: shared template + per-account overrides if any
+   - `accessToken = await window.khutbah.auth.accessToken(account.channelId)`
+   - `playlistId = await window.khutbah.pipeline.call('playlists.resolve_or_create', { access_token: accessToken, name_or_id: account.defaultPlaylistName ?? account.defaultPlaylistId, auto_create: settings.autoCreateMissingPlaylists, visibility: meta.visibility })`
+   - `videoId = await window.khutbah.pipeline.call('upload.video', { access_token, ...meta, file_path: partOutputPath })`
+   - `await window.khutbah.pipeline.call('upload.thumbnail', { access_token, video_id: videoId, thumbnail_path })`
+   - if `playlistId`: `await window.khutbah.pipeline.call('playlists.add_video', { access_token, playlist_id: playlistId, video_id: videoId })`
+   - Update store `Project.part1.uploads[account.channelId] = { videoId, status: 'done' }` (or 'failed' on error)
+4. Notification: aggregate result — `"Uploaded both parts to N accounts"` with one link per (account, part) opened to YouTube Studio if more than one
+
+**Failure isolation**: wrap each `(part, account)` pair in its own try/catch. One pair failing does not abort other pairs. Surface failed pairs in the notification body so the user knows what to retry.
 
 **Files:**
 - Create: `src/lib/autopilot.ts`, modify `src/App.tsx`

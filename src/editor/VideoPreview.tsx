@@ -54,6 +54,32 @@ export const VideoPreview = forwardRef<VideoHandle, Props>(function VideoPreview
     };
   }, [onTimeUpdate, onLoadedMetadata, onPlayingChange]);
 
+  // Preserve playback position across src swaps. The Editor swaps from the
+  // raw source to the scrub-friendly proxy as soon as proxy gen finishes;
+  // without this the user gets jerked back to t=0 mid-scrub.
+  const lastTimeRef = useRef<number>(0);
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const onSeek = () => {
+      lastTimeRef.current = v.currentTime;
+    };
+    v.addEventListener('timeupdate', onSeek);
+    return () => v.removeEventListener('timeupdate', onSeek);
+  }, []);
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    // After the new src loads its metadata, restore the time we had before.
+    const onMeta = () => {
+      if (lastTimeRef.current > 0) {
+        v.currentTime = Math.min(lastTimeRef.current, v.duration || lastTimeRef.current);
+      }
+    };
+    v.addEventListener('loadedmetadata', onMeta);
+    return () => v.removeEventListener('loadedmetadata', onMeta);
+  }, [src]);
+
   return (
     <div className="bg-black rounded-md aspect-video relative border border-border-strong overflow-hidden">
       <video ref={videoRef} src={src} className="w-full h-full" controls preload="metadata" />

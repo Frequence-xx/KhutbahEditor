@@ -348,26 +348,30 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
       )}
       <div className="flex-1 p-6 grid grid-cols-[1fr_280px] gap-0">
         <div className="bg-bg-0 p-4 rounded-l-lg border border-border-strong">
-          {error && (
-            <div className="space-y-2 py-12 px-4">
-              <div className="text-danger text-sm">Preview proxy failed: {error}</div>
-              <Button variant="ghost" onClick={regenerateProxy}>↻ Try again</Button>
-            </div>
-          )}
+          <VideoPreview
+            ref={videoRef}
+            src={toKhutbahFileUrl(project.proxyPath ?? project.sourcePath)}
+            onTimeUpdate={setCurrentTime}
+            onPlayingChange={setIsPlaying}
+          />
+          {/* Non-blocking proxy status — the source video plays right away;
+              once the proxy completes the src above swaps automatically and
+              this banner disappears, giving you fast scrubbing without
+              having had to wait for it. */}
           {!proxyReady && !error && (
-            <div className="space-y-2 py-12 px-4">
-              <div className="flex items-center gap-3">
-                <div className="w-2 h-2 rounded-full bg-amber animate-pulse" aria-hidden />
-                <span className="text-text-strong text-sm">
-                  {proxyProgress?.message ?? 'Generating preview proxy…'}
+            <div className="mt-2 px-3 py-2 bg-bg-2 border border-border-strong rounded text-xs">
+              <div className="flex items-center gap-2">
+                <div className="w-1.5 h-1.5 rounded-full bg-amber animate-pulse" aria-hidden />
+                <span className="text-text-muted">
+                  {proxyProgress?.message ?? 'Building scrub-friendly preview proxy in the background…'}
                 </span>
                 {proxyProgress?.progress !== undefined && (
-                  <span className="ml-auto text-text-muted text-xs font-mono">
+                  <span className="ml-auto text-text-muted font-mono">
                     {proxyProgress.progress}%
                   </span>
                 )}
               </div>
-              <div className="h-1.5 bg-border-strong rounded overflow-hidden">
+              <div className="h-0.5 mt-1 bg-border-strong rounded overflow-hidden">
                 {proxyProgress?.progress !== undefined ? (
                   <div
                     className="h-full bg-gradient-to-r from-amber to-amber-dark transition-all duration-300"
@@ -382,13 +386,11 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
               </div>
             </div>
           )}
-          {proxyReady && project.proxyPath && (
-            <VideoPreview
-              ref={videoRef}
-              src={toKhutbahFileUrl(project.proxyPath)}
-              onTimeUpdate={setCurrentTime}
-              onPlayingChange={setIsPlaying}
-            />
+          {error && (
+            <div className="mt-2 px-3 py-2 bg-danger/10 border border-danger/40 rounded text-xs text-danger flex items-center gap-2">
+              <span>Preview proxy failed: {error}</span>
+              <Button variant="ghost" onClick={regenerateProxy}>↻ Try again</Button>
+            </div>
           )}
           <div className="mt-3 text-text-muted text-xs font-mono">Time: {currentTime.toFixed(2)} s</div>
         </div>
@@ -404,7 +406,7 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
           else videoRef.current?.play();
         }}
         isPlaying={isPlaying}
-        videoReady={proxyReady}
+        videoReady={!!project.sourcePath}
         waveform={waveform}
         waveformStatus={waveformStatus}
         onRetryWaveform={() => {

@@ -1,6 +1,6 @@
 import { app, BrowserWindow, shell } from 'electron';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import electronUpdater from 'electron-updater';
 import { SidecarManager } from './sidecar/manager.js';
 import { registerIpcHandlers } from './ipc/handlers.js';
@@ -67,8 +67,14 @@ function createWindow() {
     } else {
       // file:// origin is "null" in WHATWG URL semantics. Require protocol === 'file:'
       // AND that the path resolves inside the packaged app's dist-web/ folder.
-      const distWebPath = path.join(__dirname, '../dist-web');
-      if (parsed.protocol !== 'file:' || !parsed.pathname.startsWith(distWebPath)) {
+      // Use pathToFileURL so both sides use forward-slash pathnames on all platforms
+      // (path.join returns backslashes on Windows, but URL.pathname is always forward-slash).
+      if (parsed.protocol !== 'file:') {
+        event.preventDefault();
+        return;
+      }
+      const distWebPathname = pathToFileURL(path.join(__dirname, '../dist-web')).pathname;
+      if (!parsed.pathname.startsWith(distWebPathname)) {
         event.preventDefault();
       }
     }
@@ -84,7 +90,36 @@ function createWindow() {
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 
+function buildSidecarEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+
+  // Augment PATH so the Python sidecar's shutil.which() finds bundled binaries.
+  // In dev, fall back to the system PATH (assume system ffmpeg/yt-dlp exist).
+  if (!isDev) {
+    // Determine OS/arch — must match how fetch-resources.sh laid them out.
+    const osDir =
+      process.platform === 'darwin' ? 'macOS' :
+      process.platform === 'win32' ? 'Windows' :
+      'Linux';
+    const archDir = process.arch === 'arm64' ? 'arm64' : 'x64';
+    const binDir = path.join(process.resourcesPath, 'bin', osDir, archDir);
+    const pathSep = process.platform === 'win32' ? ';' : ':';
+    env.PATH = `${binDir}${pathSep}${process.env.PATH ?? ''}`;
+  }
+
+  // Tell the Python sidecar where the bundled Whisper model lives.
+  // Packaged: <resourcesPath>/models/whisper-large-v3/ (per electron-builder.json)
+  // Dev: <repo>/resources/models/whisper-large-v3/ (downloaded by fetch-resources.sh)
+  env.KHUTBAH_MODEL_DIR = isDev
+    ? path.resolve('resources/models/whisper-large-v3')
+    : path.join(process.resourcesPath, 'models', 'whisper-large-v3');
+
+  return env;
+}
+
 app.whenReady().then(async () => {
+  const sidecarEnv = buildSidecarEnv();
+
   sidecar = isDev
     ? new SidecarManager({
         pythonExecutable: path.resolve(
@@ -94,6 +129,7 @@ app.whenReady().then(async () => {
         ),
         moduleEntry: 'khutbah_pipeline',
         cwd: path.resolve('python-pipeline'),
+        env: sidecarEnv,
       })
     : new SidecarManager({
         pythonExecutable: path.join(
@@ -104,6 +140,7 @@ app.whenReady().then(async () => {
         ),
         moduleEntry: 'khutbah_pipeline',
         cwd: process.resourcesPath,
+        env: sidecarEnv,
       });
   try {
     await sidecar.start();

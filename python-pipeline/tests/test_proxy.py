@@ -90,7 +90,7 @@ def hidef_10bit_source(tmp_path: Path) -> Path:
     out = tmp_path / "src.mp4"
     subprocess.run(
         ["ffmpeg", "-y",
-         "-f", "lavfi", "-i", "testsrc=duration=5:size=1920x1080:rate=24",
+         "-f", "lavfi", "-i", "testsrc=duration=15:size=1920x1080:rate=24",
          "-c:v", "libx264", "-pix_fmt", "yuv420p10le", "-profile:v", "high10",
          "-loglevel", "error", str(out)],
         check=True, capture_output=True,

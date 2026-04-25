@@ -147,6 +147,10 @@ def upload_file(
                         return None  # resume incomplete — chunk accepted, continue
                     if e.code == 401:
                         raise RuntimeError("token_expired:401") from e
+                    if e.code in RETRYABLE_STATUSES:
+                        # Re-raise raw HTTPError so _retry_with_backoff can see it and retry.
+                        raise
+                    # Non-retryable 4xx (other than 401) — surface with body for diagnostics.
                     body = e.read().decode("utf-8", errors="replace") if e.fp else ""
                     raise RuntimeError(
                         f"YouTube upload chunk failed (HTTP {e.code}): {body[:500]}"

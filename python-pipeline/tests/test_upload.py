@@ -67,6 +67,65 @@ def test_upload_handles_final_chunk_308_via_status_query(tmp_path):
     assert result == {"video_id": "abc123XYZ"}
 
 
+def test_upload_retries_on_5xx_then_succeeds(tmp_path):
+    """Chunk PUT returns 500 once, then 200 — retry should fire and upload completes."""
+    from khutbah_pipeline.upload import resumable
+    from unittest.mock import MagicMock, patch
+
+    video_file = tmp_path / "test.mp4"
+    video_file.write_bytes(b"x" * 100)
+
+    call_count = {"n": 0}
+
+    def fake_urlopen(req, timeout=None):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            # First chunk attempt: 500 (retryable). Re-raised; retry should fire.
+            raise urllib.error.HTTPError(
+                url="x", code=500, msg="Server Error", hdrs=None, fp=None,
+            )
+        # Second attempt: 200 with video JSON
+        mock = MagicMock()
+        mock.status = 200
+        mock.read.return_value = b'{"id": "video_after_retry"}'
+        mock.__enter__ = MagicMock(return_value=mock)
+        mock.__exit__ = MagicMock(return_value=False)
+        return mock
+
+    # Speed up backoff sleep so the test stays under 30s
+    with patch("khutbah_pipeline.upload.resumable.time.sleep"), \
+         patch("khutbah_pipeline.upload.resumable.urllib.request.urlopen", side_effect=fake_urlopen):
+        result = resumable.upload_file(
+            "fake-token",
+            "https://upload.youtube.com/whatever",
+            str(video_file),
+        )
+
+    assert result == {"video_id": "video_after_retry"}
+    assert call_count["n"] == 2  # First failed with 500, second succeeded
+
+
+def test_upload_does_not_retry_on_400(tmp_path):
+    """Chunk PUT 400 (non-retryable) raises immediately."""
+    from khutbah_pipeline.upload import resumable
+    import pytest as _pytest
+
+    video_file = tmp_path / "test.mp4"
+    video_file.write_bytes(b"x" * 100)
+
+    err_response = urllib.error.HTTPError(
+        url="x", code=400, msg="Bad Request", hdrs=None, fp=None,
+    )
+
+    with patch("khutbah_pipeline.upload.resumable.urllib.request.urlopen", side_effect=err_response):
+        with _pytest.raises(RuntimeError, match="HTTP 400"):
+            resumable.upload_file(
+                "fake-token",
+                "https://upload.youtube.com/whatever",
+                str(video_file),
+            )
+
+
 def test_resolve_or_create_playlist_uses_existing_id():
     from khutbah_pipeline.upload.playlists import resolve_or_create_playlist
     # If name_or_id starts with PL, return it directly without API call

@@ -36,8 +36,12 @@ def _mux(video_path: str, audio_path: str, offset_seconds: float, dst: str) -> d
     return {"path": dst}
 
 @register("edit.generate_proxy")
-def _proxy(src: str, dst: str) -> dict[str, str]:
-    generate_proxy(src, dst)
+def _proxy(
+    src: str,
+    dst: str,
+    notify: Optional[Callable[[dict[str, Any]], None]] = None,
+) -> dict[str, str]:
+    generate_proxy(src, dst, progress_cb=notify)
     return {"path": dst}
 
 @register("edit.smart_cut")

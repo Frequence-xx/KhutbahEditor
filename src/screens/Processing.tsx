@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useProjects } from '../store/projects';
 import { useMarkers } from '../editor/markersStore';
+import { withETA, formatETA, type EnrichedProgress } from '../lib/eta';
 
 type Stage = 'extract_audio' | 'transcribe' | 'detect_boundaries' | 'done';
 
@@ -26,10 +27,27 @@ export function Processing({ projectId, onDone, onError }: Props) {
   const setMarker = useMarkers((s) => s.setMarker);
   const reset = useMarkers((s) => s.reset);
   const [stage, setStage] = useState<Stage>('extract_audio');
+  const [progress, setProgress] = useState<EnrichedProgress | null>(null);
 
   useEffect(() => {
     if (!project || !window.khutbah) return;
     let cancelled = false;
+    const unsubscribe = window.khutbah.pipeline.onProgress((params) => {
+      if (cancelled) return;
+      const p = {
+        stage: typeof params.stage === 'string' ? params.stage : 'transcribe',
+        message: typeof params.message === 'string' ? params.message : '',
+        progress: typeof params.progress === 'number' ? Math.round(params.progress * 100) : undefined,
+      };
+      setProgress((prev) => withETA(prev, p));
+      if (typeof params.stage === 'string') {
+        if (params.stage === 'transcribe' || params.stage === 'extract_audio') {
+          setStage(params.stage as Stage);
+        } else if (params.stage === 'detect') {
+          setStage('detect_boundaries');
+        }
+      }
+    });
     (async () => {
       try {
         setStage('transcribe');
@@ -85,6 +103,7 @@ export function Processing({ projectId, onDone, onError }: Props) {
     })();
     return () => {
       cancelled = true;
+      unsubscribe();
     };
   }, [project?.id, project?.sourcePath, onDone, onError, reset, setMarker, updateProject]);
 
@@ -98,7 +117,33 @@ export function Processing({ projectId, onDone, onError }: Props) {
   return (
     <div className="flex-1 p-8 flex items-center justify-center">
       <div className="max-w-md w-full bg-bg-2 border border-border-strong rounded-lg p-6">
-        <h2 className="font-display text-xl tracking-wider text-text-strong mb-4">PROCESSING</h2>
+        <div className="flex items-center gap-3 mb-4">
+          <h2 className="font-display text-xl tracking-wider text-text-strong">PROCESSING</h2>
+          {progress?.progress !== undefined && (
+            <span className="ml-auto text-text-muted text-sm font-mono">
+              {Math.round(progress.progress)}%
+              {progress.etaSeconds !== undefined && progress.etaSeconds > 0 && (
+                <span className="ml-2 text-text-dim">· ~{formatETA(progress.etaSeconds)} left</span>
+              )}
+            </span>
+          )}
+        </div>
+        {progress?.message && (
+          <p className="text-text-dim text-sm mb-4 break-words">{progress.message}</p>
+        )}
+        <div className="h-1.5 bg-border-strong rounded overflow-hidden mb-4">
+          {progress?.progress !== undefined ? (
+            <div
+              className="h-full bg-gradient-to-r from-amber to-amber-dark transition-all duration-300"
+              style={{ width: `${Math.max(0, Math.min(100, progress.progress))}%` }}
+            />
+          ) : (
+            <div
+              className="h-full bg-gradient-to-r from-transparent via-amber to-transparent animate-pulse"
+              style={{ width: '40%' }}
+            />
+          )}
+        </div>
         <div className="space-y-3">
           {stages.map((s, i) => (
             <div key={s.key} className="flex items-center gap-3">

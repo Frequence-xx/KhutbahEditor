@@ -14,6 +14,7 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
   const project = useProjects((s) => s.projects.find((p) => p.id === projectId));
   const updateProject = useProjects((s) => s.update);
   const [proxyReady, setProxyReady] = useState<boolean>(!!project?.proxyPath);
+  const [proxyProgress, setProxyProgress] = useState<{ message: string; progress?: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const videoRef = useRef<VideoHandle>(null);
   const [currentTime, setCurrentTime] = useState<number>(0);
@@ -57,6 +58,14 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
   useEffect(() => {
     if (!project || project.proxyPath || !window.khutbah) return;
     let cancelled = false;
+    setProxyProgress({ message: 'Starting preview proxy…' });
+    const unsubscribe = window.khutbah.pipeline.onProgress((params) => {
+      if (cancelled || params.stage !== 'proxy') return;
+      setProxyProgress({
+        message: typeof params.message === 'string' ? params.message : 'Generating preview proxy…',
+        progress: typeof params.progress === 'number' ? Math.round(params.progress * 100) : undefined,
+      });
+    });
     (async () => {
       try {
         const proxyPath = project.sourcePath + '.proxy.mp4';
@@ -67,12 +76,19 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
         if (cancelled) return;
         updateProject(project.id, { proxyPath });
         setProxyReady(true);
-      } catch (e) {
-        if (!cancelled) setError(String(e));
+        setProxyProgress(null);
+      } catch (e: unknown) {
+        if (cancelled) return;
+        const msg = e && typeof e === 'object' && 'message' in e
+          ? String((e as { message: unknown }).message)
+          : String(e);
+        setError(msg);
+        setProxyProgress(null);
       }
     })();
     return () => {
       cancelled = true;
+      unsubscribe();
     };
   }, [project?.id, project?.proxyPath, project?.sourcePath, updateProject]);
 
@@ -136,7 +152,34 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
       <div className="flex-1 p-6 grid grid-cols-[1fr_280px] gap-0">
         <div className="bg-bg-0 p-4 rounded-l-lg border border-border-strong">
           {error && <div className="text-danger text-sm">Proxy generation failed: {error}</div>}
-          {!proxyReady && !error && <div className="text-text-muted text-sm">Generating preview proxy…</div>}
+          {!proxyReady && !error && (
+            <div className="space-y-2 py-12 px-4">
+              <div className="flex items-center gap-3">
+                <div className="w-2 h-2 rounded-full bg-amber animate-pulse" aria-hidden />
+                <span className="text-text-strong text-sm">
+                  {proxyProgress?.message ?? 'Generating preview proxy…'}
+                </span>
+                {proxyProgress?.progress !== undefined && (
+                  <span className="ml-auto text-text-muted text-xs font-mono">
+                    {proxyProgress.progress}%
+                  </span>
+                )}
+              </div>
+              <div className="h-1.5 bg-border-strong rounded overflow-hidden">
+                {proxyProgress?.progress !== undefined ? (
+                  <div
+                    className="h-full bg-gradient-to-r from-amber to-amber-dark transition-all duration-300"
+                    style={{ width: `${Math.max(0, Math.min(100, proxyProgress.progress))}%` }}
+                  />
+                ) : (
+                  <div
+                    className="h-full bg-gradient-to-r from-transparent via-amber to-transparent animate-pulse"
+                    style={{ width: '40%' }}
+                  />
+                )}
+              </div>
+            </div>
+          )}
           {proxyReady && project.proxyPath && (
             <VideoPreview
               ref={videoRef}

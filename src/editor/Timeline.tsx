@@ -8,6 +8,8 @@ type Props = {
   isPlaying: boolean;
   videoReady: boolean;
   waveform?: number[] | null;
+  waveformStatus?: 'idle' | 'loading' | 'failed';
+  onRetryWaveform?: () => void;
 };
 
 const COLORS: Record<MarkerKey, string> = {
@@ -33,7 +35,16 @@ function fmtTime(t: number): string {
   return `${m}:${sec.toFixed(2).padStart(5, '0')}`;
 }
 
-export function Timeline({ currentTime, onSeek, onPlayPause, isPlaying, videoReady, waveform }: Props) {
+export function Timeline({
+  currentTime,
+  onSeek,
+  onPlayPause,
+  isPlaying,
+  videoReady,
+  waveform,
+  waveformStatus = 'idle',
+  onRetryWaveform,
+}: Props) {
   const { markers, duration, setMarker } = useMarkers();
   const trackRef = useRef<HTMLDivElement>(null);
   const dragging = useRef<MarkerKey | null>(null);
@@ -214,6 +225,22 @@ export function Timeline({ currentTime, onSeek, onPlayPause, isPlaying, videoRea
             />
             <span className="font-mono">{vZoom.toFixed(1)}×</span>
           </label>
+        )}
+        {waveformStatus === 'loading' && !waveform && (
+          <span className="text-text-dim flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber animate-pulse" aria-hidden />
+            Loading audio track…
+          </span>
+        )}
+        {waveformStatus === 'failed' && !waveform && (
+          <span className="text-danger flex items-center gap-1">
+            Audio track unavailable
+            {onRetryWaveform && (
+              <button onClick={onRetryWaveform} className="underline hover:text-text-strong ml-1">
+                retry
+              </button>
+            )}
+          </span>
         )}
         <span className="ml-auto text-text-dim">
           Space play/pause · J/L ±5s · ←/→ ±0.1s · I/O Part 1 · K/, Part 2

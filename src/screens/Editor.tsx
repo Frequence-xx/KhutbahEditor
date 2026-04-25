@@ -40,6 +40,7 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
   const [detecting, setDetecting] = useState<EnrichedProgress | null>(null);
   const [detectionError, setDetectionError] = useState<string | null>(null);
   const [waveform, setWaveform] = useState<number[] | null>(null);
+  const [waveformStatus, setWaveformStatus] = useState<'idle' | 'loading' | 'failed'>('idle');
   const settings = useSettings((s) => s.settings);
   const loadSettings = useSettings((s) => s.load);
 
@@ -166,22 +167,26 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
     }
   }
 
-  // Lazy-fetch the waveform once the source is known. Background task; if it
-  // fails we silently fall back to the marker-only timeline. We pull from the
-  // ORIGINAL source (not proxy) because audio quality is irrelevant here —
-  // we just need amplitude over time. ~0.8s/5min on this machine.
+  // Lazy-fetch the waveform once the source is known. Background task; on
+  // failure we surface waveformStatus='failed' so the user knows why the
+  // audio track didn't render. ~0.8s/5min on this machine.
   useEffect(() => {
     if (!project || !window.khutbah || waveform) return;
     let cancelled = false;
+    setWaveformStatus('loading');
     (async () => {
       try {
         const w = await window.khutbah!.pipeline.call<{ peaks: number[] }>(
           'edit.waveform',
           { src: project.sourcePath, peaks_count: 1500 },
         );
-        if (!cancelled) setWaveform(w.peaks);
-      } catch {
-        // Non-fatal: timeline works without waveform.
+        if (cancelled) return;
+        setWaveform(w.peaks);
+        setWaveformStatus('idle');
+      } catch (e: unknown) {
+        if (cancelled) return;
+        console.warn('[editor] waveform fetch failed:', e);
+        setWaveformStatus('failed');
       }
     })();
     return () => {
@@ -376,6 +381,11 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
         isPlaying={isPlaying}
         videoReady={proxyReady}
         waveform={waveform}
+        waveformStatus={waveformStatus}
+        onRetryWaveform={() => {
+          setWaveform(null);
+          setWaveformStatus('idle');
+        }}
       />
       <div className="px-6 py-3 border-t border-border-strong flex items-center gap-3">
         {exportError && <span className="text-danger text-xs">{exportError}</span>}

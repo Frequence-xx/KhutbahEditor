@@ -12,10 +12,14 @@ export function withETA(prev: EnrichedProgress | null, next: ProgressUpdate): En
   const startedAt =
     prev && prev.stage === next.stage && prev.startedAt ? prev.startedAt : Date.now();
   let etaSeconds: number | undefined;
-  if (next.progress !== undefined && next.progress > 5 && next.progress < 100) {
+  if (next.progress !== undefined && next.progress >= 2 && next.progress < 100) {
     const elapsed = (Date.now() - startedAt) / 1000;
-    const total = elapsed / (next.progress / 100);
-    etaSeconds = Math.max(0, total - elapsed);
+    if (elapsed >= 1) {
+      // Skip ETA on the very first tick — division on a sub-second elapsed
+      // produces wildly off totals (e.g. 100s ETA from 0.1s elapsed at 5%).
+      const total = elapsed / (next.progress / 100);
+      etaSeconds = Math.max(0, total - elapsed);
+    }
   }
   return { ...next, startedAt, etaSeconds };
 }

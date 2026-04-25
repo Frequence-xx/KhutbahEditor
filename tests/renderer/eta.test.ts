@@ -30,10 +30,19 @@ describe('withETA', () => {
     expect(second.startedAt).toBe(baseTime + 10_000);
   });
 
-  it('omits ETA when progress is <= 5% (too noisy)', () => {
+  it('omits ETA on the very first tick — sub-second elapsed produces garbage', () => {
     vi.spyOn(Date, 'now').mockReturnValue(1_000_000_000_000);
-    const first = withETA(null, { stage: 'x', message: '', progress: 2 });
+    const first = withETA(null, { stage: 'x', message: '', progress: 10 });
     expect(first.etaSeconds).toBeUndefined();
+  });
+
+  it('omits ETA below 2% (too noisy)', () => {
+    const baseTime = 1_000_000_000_000;
+    vi.spyOn(Date, 'now').mockReturnValue(baseTime);
+    const first = withETA(null, { stage: 'x', message: '', progress: 1 });
+    vi.spyOn(Date, 'now').mockReturnValue(baseTime + 5000);
+    const second = withETA(first, { stage: 'x', message: '', progress: 1 });
+    expect(second.etaSeconds).toBeUndefined();
   });
 
   it('omits ETA when progress is 100% (done)', () => {

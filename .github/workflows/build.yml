@@ -7,6 +7,9 @@ on:
     - cron: '0 2 * * *'                        # nightly integration run at 02:00 UTC
   release: { types: [created] }
 
+permissions:
+  contents: read
+
 jobs:
   unit-tests:
     name: Unit tests (${{ matrix.os }})
@@ -30,10 +33,19 @@ jobs:
           python -m venv .venv
           if [ "${{ runner.os }}" = "Windows" ]; then source .venv/Scripts/activate; else source .venv/bin/activate; fi
           pip install -e ".[dev]"
+      - name: Build Electron (main + preload)
+        run: npm run build:electron
+        shell: bash
+      - name: ESM smoke gate — verify main.js resolves all relative imports
+        shell: bash
+        run: |
+          node --input-type=module -e "import('./dist-electron/main.js').then(() => console.log('ESM OK')).catch(e => { if (e.code === 'ERR_MODULE_NOT_FOUND') { console.error(e.message); process.exit(1); } console.log('ESM OK (electron not available outside runtime)'); })"
       - name: Lint (ESLint)
-        run: timeout 60 npm run lint || echo "::warning::ESLint config not yet present (Task 0.12 adds it)"
+        run: timeout 60 npm run lint
+        shell: bash
       - name: TypeScript tests (Vitest, unit only, 300s wrapper)
         run: timeout 300 npm test
+        shell: bash
       - name: Python tests (Pytest, unit only — exclude @pytest.mark.integration, 300s wrapper)
         working-directory: python-pipeline
         shell: bash
@@ -75,7 +87,8 @@ jobs:
         working-directory: python-pipeline
         run: |
           source .venv/bin/activate
-          timeout 1500 pytest -m integration
+          # Integration tests run real Whisper inference; 5+ min is normal. Job timeout-minutes: 30 is the hard cap.
+          pytest -m integration
       - name: Upload integration artifacts on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -87,6 +100,8 @@ jobs:
   package:
     needs: unit-tests
     if: github.event_name == 'release'
+    permissions:
+      contents: write   # for softprops/action-gh-release@v2
     strategy:
       matrix:
         include:

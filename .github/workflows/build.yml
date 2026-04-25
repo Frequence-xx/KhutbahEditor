@@ -1,0 +1,131 @@
+name: Build
+on:
+  push: { branches: [main] }
+  pull_request: { branches: [main] }
+  workflow_dispatch:                           # manual trigger for integration tests
+  schedule:
+    - cron: '0 2 * * *'                        # nightly integration run at 02:00 UTC
+  release: { types: [created] }
+
+jobs:
+  unit-tests:
+    name: Unit tests (${{ matrix.os }})
+    strategy:
+      matrix:
+        os: [macos-14, windows-2022, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 8                          # 300s shell timeout × 2 layers + buffer
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - name: Install Node deps
+        run: npm ci
+      - name: Install Python pipeline (dev)
+        working-directory: python-pipeline
+        shell: bash
+        run: |
+          python -m venv .venv
+          if [ "${{ runner.os }}" = "Windows" ]; then source .venv/Scripts/activate; else source .venv/bin/activate; fi
+          pip install -e ".[dev]"
+      - name: Lint (ESLint)
+        run: timeout 60 npm run lint || echo "::warning::ESLint config not yet present (Task 0.12 adds it)"
+      - name: TypeScript tests (Vitest, unit only, 300s wrapper)
+        run: timeout 300 npm test
+      - name: Python tests (Pytest, unit only — exclude @pytest.mark.integration, 300s wrapper)
+        working-directory: python-pipeline
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then source .venv/Scripts/activate; else source .venv/bin/activate; fi
+          timeout 300 pytest -m "not integration"
+      - name: Upload test artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-${{ matrix.os }}
+          path: |
+            tests/reports/
+            python-pipeline/tests/reports/
+            playwright-report/
+          retention-days: 14
+
+  integration-tests:
+    name: Integration tests (Linux only, on-demand + nightly)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30                         # Whisper model download + inference
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: npm ci
+      - name: Install Python pipeline (dev)
+        working-directory: python-pipeline
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          pip install -e ".[dev]"
+      - name: Fetch resources (FFmpeg + yt-dlp + Whisper model)
+        run: bash resources/fetch-resources.sh Linux x64
+      - name: Run integration tests (real FFmpeg + Whisper)
+        working-directory: python-pipeline
+        run: |
+          source .venv/bin/activate
+          timeout 1500 pytest -m integration
+      - name: Upload integration artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-reports
+          path: python-pipeline/tests/reports/
+          retention-days: 14
+
+  package:
+    needs: unit-tests
+    if: github.event_name == 'release'
+    strategy:
+      matrix:
+        include:
+          - os: macos-13
+            arch: x64
+          - os: macos-14
+            arch: arm64
+          - os: windows-2022
+            arch: x64
+          - os: ubuntu-22.04
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: npm ci
+      - name: Build pipeline binary
+        working-directory: python-pipeline
+        shell: bash
+        run: |
+          python -m venv .venv
+          if [ "${{ runner.os }}" = "Windows" ]; then source .venv/Scripts/activate; else source .venv/bin/activate; fi
+          pip install -e ".[dev]"
+          pyinstaller --noconfirm khutbah_pipeline.spec
+      - name: Fetch resources
+        shell: bash
+        run: bash resources/fetch-resources.sh ${{ runner.os }} ${{ matrix.arch }}
+      - name: Build app
+        run: npm run package -- --${{ matrix.arch }}
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/*.dmg
+            release/*.exe
+            release/*.AppImage
+            release/*.deb
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -2,6 +2,7 @@
 import os
 from typing import Any, Optional
 from khutbah_pipeline.rpc import RpcServer, register
+from khutbah_pipeline.align.crosscorr import align_files
 from khutbah_pipeline.ingest.local import probe_local
 from khutbah_pipeline.ingest.youtube import info_only, download
 from khutbah_pipeline.edit.proxy import generate_proxy
@@ -19,6 +20,10 @@ from khutbah_pipeline.upload.playlists import (
 @register("ping")
 def ping() -> dict[str, object]:
     return {"ok": True, "version": __import__("khutbah_pipeline").__version__}
+
+@register("align.dual_file")
+def _align(video_path: str, audio_path: str) -> dict[str, Any]:
+    return align_files(video_path, audio_path)
 
 @register("ingest.probe_local")
 def _probe(path: str) -> dict[str, Any]:

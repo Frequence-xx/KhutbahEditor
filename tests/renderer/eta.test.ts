@@ -36,13 +36,25 @@ describe('withETA', () => {
     expect(first.etaSeconds).toBeUndefined();
   });
 
-  it('omits ETA below 2% (too noisy)', () => {
+  it('omits ETA below 1% (too noisy / sub-percent rounding)', () => {
     const baseTime = 1_000_000_000_000;
     vi.spyOn(Date, 'now').mockReturnValue(baseTime);
-    const first = withETA(null, { stage: 'x', message: '', progress: 1 });
+    const first = withETA(null, { stage: 'x', message: '', progress: 0 });
     vi.spyOn(Date, 'now').mockReturnValue(baseTime + 5000);
-    const second = withETA(first, { stage: 'x', message: '', progress: 1 });
+    const second = withETA(first, { stage: 'x', message: '', progress: 0 });
     expect(second.etaSeconds).toBeUndefined();
+  });
+
+  it('shows ETA at progress=1 (Whisper first-segment threshold)', () => {
+    const baseTime = 1_000_000_000_000;
+    vi.spyOn(Date, 'now').mockReturnValue(baseTime);
+    const first = withETA(null, { stage: 'transcribe', message: '', progress: 0 });
+    // After 10s real time, first segment lands at frac=0.011 → progress=1
+    vi.spyOn(Date, 'now').mockReturnValue(baseTime + 10_000);
+    const second = withETA(first, { stage: 'transcribe', message: '', progress: 1 });
+    // 10s elapsed at 1% ⇒ ~990s remaining; sanity-check it's a positive
+    // multi-minute estimate, not zero/undefined.
+    expect(second.etaSeconds).toBeGreaterThan(60);
   });
 
   it('omits ETA when progress is 100% (done)', () => {

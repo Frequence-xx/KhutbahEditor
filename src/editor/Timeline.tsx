@@ -211,21 +211,19 @@ export function Timeline({
           />
           <span className="font-mono">{zoom.toFixed(1)}×</span>
         </label>
-        {waveform && (
-          <label className="flex items-center gap-2">
-            <span>Wave</span>
-            <input
-              type="range"
-              min={1}
-              max={6}
-              step={0.5}
-              value={vZoom}
-              onChange={(e) => setVZoom(parseFloat(e.target.value))}
-              className="w-24 accent-amber"
-            />
-            <span className="font-mono">{vZoom.toFixed(1)}×</span>
-          </label>
-        )}
+        <label className="flex items-center gap-2">
+          <span>Track</span>
+          <input
+            type="range"
+            min={1}
+            max={6}
+            step={0.5}
+            value={vZoom}
+            onChange={(e) => setVZoom(parseFloat(e.target.value))}
+            className="w-24 accent-amber"
+          />
+          <span className="font-mono">{vZoom.toFixed(1)}×</span>
+        </label>
         {waveformStatus === 'loading' && !waveform && (
           <span className="text-text-dim flex items-center gap-1">
             <span className="w-1.5 h-1.5 rounded-full bg-amber animate-pulse" aria-hidden />
@@ -247,12 +245,12 @@ export function Timeline({
         </span>
       </div>
 
-      <div className="overflow-x-auto khutbah-scrollbar pb-2">
+      <div className="overflow-auto khutbah-scrollbar pb-2 max-h-80">
         <div
           ref={trackRef}
           onClick={onTrackClick}
-          style={{ width: trackWidth }}
-          className="relative h-20 bg-bg-1 border border-border-strong rounded-md cursor-pointer"
+          style={{ width: trackWidth, height: `${80 * vZoom}px` }}
+          className="relative bg-bg-1 border border-border-strong rounded-md cursor-pointer"
         >
           {ticks.map((t) => (
             <div
@@ -273,7 +271,10 @@ export function Timeline({
               aria-hidden
             >
               {waveform.map((p, i) => {
-                const h = Math.min(100, p * 100 * vZoom);
+                // Normalised 0..100 — the SVG stretches to fill the (now
+                // taller) track via preserveAspectRatio=none, so the bars
+                // get bigger as the user raises the Track zoom slider.
+                const h = Math.min(100, p * 100);
                 return (
                   <line
                     key={i}

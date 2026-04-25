@@ -1,4 +1,7 @@
 import { ipcMain, dialog } from 'electron';
+import os from 'os';
+import path from 'path';
+import fs from 'fs/promises';
 import { SidecarManager } from '../sidecar/manager.js';
 
 export function registerIpcHandlers(sidecar: SidecarManager): void {
@@ -15,5 +18,15 @@ export function registerIpcHandlers(sidecar: SidecarManager): void {
       ],
     });
     return r.canceled ? null : r.filePaths[0];
+  });
+  ipcMain.handle('paths:defaultOutputDir', () => {
+    const home = os.homedir();
+    const today = new Date().toISOString().slice(0, 10);
+    const base = process.platform === 'darwin' ? 'Movies' : 'Videos';
+    return path.join(home, base, 'KhutbahEditor', today);
+  });
+  ipcMain.handle('paths:ensureDir', async (_e, dir: string) => {
+    await fs.mkdir(dir, { recursive: true });
+    return dir;
   });
 }

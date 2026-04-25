@@ -4,6 +4,7 @@ import { VideoPreview, VideoHandle } from '../editor/VideoPreview';
 import { Button } from '../components/ui/Button';
 import { Timeline } from '../editor/Timeline';
 import { useMarkers } from '../editor/markersStore';
+import { ProgressBar } from '../components/ui/ProgressBar';
 
 type Props = { projectId: string; onBack: () => void };
 
@@ -15,6 +16,9 @@ export function Editor({ projectId, onBack }: Props) {
   const videoRef = useRef<VideoHandle>(null);
   const [currentTime, setCurrentTime] = useState<number>(0);
   const reset = useMarkers((s) => s.reset);
+  const markers = useMarkers((s) => s.markers);
+  const [exporting, setExporting] = useState<{ p1: number; p2: number } | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   useEffect(() => {
     if (project) reset(project.duration);
@@ -42,6 +46,43 @@ export function Editor({ projectId, onBack }: Props) {
       cancelled = true;
     };
   }, [project?.id, project?.proxyPath, project?.sourcePath, updateProject]);
+
+  async function exportBoth(): Promise<void> {
+    if (!project || !window.khutbah) return;
+    setExportError(null);
+    setExporting({ p1: 0, p2: 0 });
+    try {
+      const dir = await window.khutbah.paths.defaultOutputDir();
+      await window.khutbah.paths.ensureDir(dir);
+      const base = `${project.id}-${Date.now()}`;
+      const p1Out = `${dir}/${base}-deel-1.mp4`;
+      const p2Out = `${dir}/${base}-deel-2.mp4`;
+
+      await window.khutbah.pipeline.call('edit.smart_cut', {
+        src: project.sourcePath,
+        dst: p1Out,
+        start: markers.p1Start,
+        end: markers.p1End,
+      });
+      setExporting({ p1: 100, p2: 0 });
+
+      await window.khutbah.pipeline.call('edit.smart_cut', {
+        src: project.sourcePath,
+        dst: p2Out,
+        start: markers.p2Start,
+        end: markers.p2End,
+      });
+      setExporting({ p1: 100, p2: 100 });
+      updateProject(project.id, {
+        status: 'processed',
+        part1: { start: markers.p1Start, end: markers.p1End, outputPath: p1Out },
+        part2: { start: markers.p2Start, end: markers.p2End, outputPath: p2Out },
+      });
+    } catch (e) {
+      setExportError(String(e));
+      setExporting(null);
+    }
+  }
 
   if (!project) return <div className="p-8">Project not found</div>;
 
@@ -72,6 +113,27 @@ export function Editor({ projectId, onBack }: Props) {
         currentTime={currentTime}
         onSeek={(t) => videoRef.current?.seek(t)}
       />
+      <div className="px-6 py-3 border-t border-border-strong flex items-center gap-3">
+        {exportError && <span className="text-danger text-xs">{exportError}</span>}
+        {exporting && (
+          <span className="text-text-muted text-xs flex items-center gap-2">
+            Exporting…
+            <span className="w-32">
+              <ProgressBar value={(exporting.p1 + exporting.p2) / 2} />
+            </span>
+          </span>
+        )}
+        {!exporting && !exportError && <span className="text-text-muted text-xs">Ready to export</span>}
+        <div className="ml-auto flex gap-2">
+          <Button
+            variant="primary"
+            onClick={exportBoth}
+            disabled={!proxyReady || !!exporting}
+          >
+            Export 2 files
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -171,9 +171,13 @@ def align_files(video_path: str, audio_path: str) -> dict[str, Any]:
     Returns ``{"offset_seconds": float, "confidence": float}``.
 
     The video's audio is the reference; the external file is the signal.
-    A positive ``offset_seconds`` means the external audio lags the camera
-    audio (pass ``-itsoffset <offset>`` to FFmpeg to pad the front of the
-    audio track and produce a correctly muxed output).
+    A positive ``offset_seconds`` means the external audio file has
+    ``offset_seconds`` of leading content that doesn't appear in the video
+    (lapel started recording earlier than camera, OR padded zeros at front);
+    `apply_offset_and_mux` will trim the audio's front via FFmpeg ``-ss``.
+    Conversely, a negative ``offset_seconds`` means the audio file's content
+    starts later than the video; `apply_offset_and_mux` will delay the
+    audio in the muxed output via ``-itsoffset``.
     """
     ref = _extract_pcm16k(video_path)
     sig = _extract_pcm16k(audio_path)

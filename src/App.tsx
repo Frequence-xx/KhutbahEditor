@@ -31,10 +31,18 @@ export default function App() {
 
   async function maybeAutoPilot(projectId: string): Promise<void> {
     // Ensure settings are loaded BEFORE checking autoPilot flag — fixes cold-start race.
+    // If load() rejects (e.g., IPC failure), fall back to manual processing
+    // rather than letting the rejection escape into the calling start flow.
     let settings = useSettings.getState().settings;
     if (!settings) {
-      await useSettings.getState().load();
-      settings = useSettings.getState().settings;
+      try {
+        await useSettings.getState().load();
+        settings = useSettings.getState().settings;
+      } catch (e) {
+        console.warn('[autopilot] settings load failed; falling back to manual processing', e);
+        setScreen({ name: 'processing', projectId });
+        return;
+      }
     }
     if (!settings || !settings.autoPilot) {
       // Fall through to manual flow: Processing screen

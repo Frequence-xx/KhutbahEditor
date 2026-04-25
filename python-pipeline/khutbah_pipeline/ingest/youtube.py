@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -6,6 +7,19 @@ from typing import Any, Callable, Optional
 from urllib.parse import urlparse
 
 YT_DLP: str = shutil.which("yt-dlp") or "yt-dlp"
+
+# YouTube bot-detection / n-challenge bypass requires a JS runtime + the EJS
+# challenge-solver lib. yt-dlp 2026.03.17+ supports both via these flags.
+# - --js-runtimes points at a Node.js binary (or deno/bun/quickjs)
+# - --remote-components ejs:github auto-downloads the solver lib on first run
+# Override the JS runtime path via KHUTBAH_JS_RUNTIME env var; default below
+# is the nvm Node on the developer's primary machine.
+_DEFAULT_JS_RUNTIME = '/home/farouq/.nvm/versions/node/v22.20.0/bin/node'
+JS_RUNTIME: str = os.environ.get('KHUTBAH_JS_RUNTIME', _DEFAULT_JS_RUNTIME)
+YT_DLP_BOT_BYPASS_FLAGS: list[str] = [
+    '--js-runtimes', f'node:{JS_RUNTIME}',
+    '--remote-components', 'ejs:github',
+]
 
 ALLOWED_HOSTS = {"www.youtube.com", "youtube.com", "m.youtube.com", "youtu.be"}
 
@@ -40,12 +54,20 @@ def info_only(url: str) -> dict[str, Any]:
     # `--` separator marks end of options; subsequent args are positional URLs.
     # Defense in depth even though _validate_youtube_url already rejects -prefixed URLs.
     r = subprocess.run(
-        [YT_DLP, "-J", "--no-warnings", "--", url],
-        check=True,
+        [YT_DLP, '-J', '--no-warnings', *YT_DLP_BOT_BYPASS_FLAGS, '--', url],
         capture_output=True,
         text=True,
         timeout=60,
     )
+    if r.returncode != 0:
+        # Surface yt-dlp's actual error message ("This video is not available",
+        # "Sign in to confirm your age", "Private video", network failure, etc.)
+        # rather than the bare CalledProcessError that hides the cause.
+        stderr = (r.stderr or '').strip()
+        # Strip the leading 'ERROR: ' prefix yt-dlp adds for cleaner UI display.
+        if stderr.startswith('ERROR: '):
+            stderr = stderr[len('ERROR: '):]
+        raise RuntimeError(stderr or f'yt-dlp exited with code {r.returncode}')
     return json.loads(r.stdout)
 
 
@@ -58,8 +80,9 @@ def download(
     _validate_youtube_url(url)
     out_template = str(Path(output_dir) / "%(title)s [%(id)s].%(ext)s")
     cmd = [
-        YT_DLP, "-f", "best[ext=mp4]/best", "-o", out_template,
-        "--no-playlist",
+        YT_DLP, '-f', 'best[ext=mp4]/best', '-o', out_template,
+        '--no-playlist',
+        *YT_DLP_BOT_BYPASS_FLAGS,
     ]
     if progress_cb:
         cmd += [

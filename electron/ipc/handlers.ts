@@ -14,7 +14,23 @@ import { accounts as accountsStore, type YouTubeAccount } from '../auth/accounts
 
 export function registerIpcHandlers(sidecar: SidecarManager): void {
   ipcMain.handle('pipeline:call', async (_e, args: { method: string; params?: object }) => {
-    return sidecar.call(args.method, args.params);
+    try {
+      return await sidecar.call(args.method, args.params);
+    } catch (rpcErr) {
+      // The Python sidecar emits JSON-RPC errors as {code, message, data}; if
+      // we let those propagate as-is, Electron's IPC serializer stringifies
+      // them as `[object Object]` in the renderer. Convert to a proper Error
+      // with a meaningful message + the RPC code on the cause.
+      if (rpcErr && typeof rpcErr === 'object' && 'message' in rpcErr) {
+        const r = rpcErr as { code?: number; message: unknown; data?: unknown };
+        const wrapped = new Error(String(r.message));
+        // Attach metadata for the renderer to introspect if it wants:
+        (wrapped as Error & { rpcCode?: number; rpcData?: unknown }).rpcCode = r.code;
+        (wrapped as Error & { rpcCode?: number; rpcData?: unknown }).rpcData = r.data;
+        throw wrapped;
+      }
+      throw rpcErr;
+    }
   });
   ipcMain.handle('ping', () => ({ ok: true, ts: Date.now() }));
   ipcMain.handle('dialog:openVideo', async () => {

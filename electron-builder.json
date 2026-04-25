@@ -2,6 +2,9 @@
   "appId": "nl.alhimmah.khutbaheditor",
   "productName": "KhutbahEditor",
   "copyright": "Copyright © 2026 Stichting Al-Himmah",
+  "publish": [
+    { "provider": "github", "owner": "Frequence-xx", "repo": "KhutbahEditor" }
+  ],
   "directories": { "output": "release", "buildResources": "build" },
   "files": [
     "dist-electron/**/*",

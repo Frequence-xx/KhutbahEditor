@@ -1,8 +1,11 @@
 import { app, BrowserWindow, shell } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import electronUpdater from 'electron-updater';
 import { SidecarManager } from './sidecar/manager.js';
 import { registerIpcHandlers } from './ipc/handlers.js';
+
+const { autoUpdater } = electronUpdater;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged;
@@ -110,6 +113,11 @@ app.whenReady().then(async () => {
   }
   registerIpcHandlers(sidecar);
   createWindow();
+  if (!isDev) {
+    autoUpdater.checkForUpdatesAndNotify().catch((e) => {
+      console.error('[updater] check failed:', e);
+    });
+  }
 });
 
 app.on('window-all-closed', () => {

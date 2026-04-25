@@ -6,6 +6,7 @@ import { Timeline } from '../editor/Timeline';
 import { useMarkers } from '../editor/markersStore';
 import { ProgressBar } from '../components/ui/ProgressBar';
 import { useSettings } from '../store/settings';
+import { PartInspector } from '../editor/PartInspector';
 
 type Props = { projectId: string; onBack: () => void };
 
@@ -122,8 +123,8 @@ export function Editor({ projectId, onBack }: Props) {
           )}
           <div className="mt-3 text-text-muted text-xs font-mono">Time: {currentTime.toFixed(2)} s</div>
         </div>
-        <div className="bg-bg-2 p-4 rounded-r-lg border-y border-r border-border-strong">
-          <div className="text-text-muted uppercase text-xs tracking-wider mb-3">Markers</div>
+        <div className="bg-bg-2 p-4 rounded-r-lg border-y border-r border-border-strong overflow-y-auto">
+          <PartInspector p1={project.part1} p2={project.part2} />
         </div>
       </div>
       <Timeline

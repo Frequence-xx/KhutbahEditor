@@ -92,19 +92,24 @@ export function Timeline({
   // Mirrors the playhead-handle scrub pattern (window listeners, scrubbing
   // ref guards the trailing click event).
   function onTrackMouseDown(e: MouseEvent<HTMLDivElement>): void {
-    // Don't hijack drags that started on a marker or the playhead handle —
-    // their own onMouseDown already handles them and stopPropagation is
-    // unreliable in React's synthetic event system.
     const tgt = e.target as HTMLElement;
+    console.log('[track-mousedown]', {
+      tagName: tgt.tagName,
+      className: tgt.className,
+      isMarker: !!tgt.closest('[data-marker-handle]'),
+      isPlayhead: !!tgt.closest('[data-playhead-handle]'),
+    });
     if (tgt.closest('[data-marker-handle]') || tgt.closest('[data-playhead-handle]')) {
       return;
     }
     if (!trackRef.current) return;
     const rect = trackRef.current.getBoundingClientRect();
+    console.log('[track-mousedown] starting scrub', { rect });
     const seekFromX = (clientX: number) => {
       const xWithin = clientX - rect.left;
       const frac = rect.width > 0 ? xWithin / rect.width : 0;
       const t = Math.max(0, Math.min(duration, frac * duration));
+      console.log('[track-scrub]', { clientX, xWithin, t });
       setLastClick({ x: xWithin, t, ts: Date.now() });
       onSeek(t);
     };
@@ -112,10 +117,9 @@ export function Timeline({
     seekFromX(e.clientX);
     const onMove = (ev: globalThis.MouseEvent) => seekFromX(ev.clientX);
     const onUp = () => {
+      console.log('[track-mouseup] ending scrub');
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
-      // Keep `scrubbing` true through the synthetic click that fires on
-      // mouseup so onTrackClick doesn't double-seek. Cleared next tick.
       setTimeout(() => { scrubbing.current = false; }, 0);
     };
     window.addEventListener('mousemove', onMove);
@@ -430,10 +434,13 @@ export function Timeline({
             ))}
           </div>
           {/* Audio lane — waveform-only, separate from segments so the
-              wave is readable independently of where the part boxes sit. */}
+              wave is readable independently of where the part boxes sit.
+              Base height is bumped above the segments lane (44 → 72) so
+              the wave is actually readable; vZoom multiplies as a single
+              global timeline scale per the user's directive. */}
           <div
             className="relative bg-bg-0 border-x border-b border-border-strong rounded-b"
-            style={{ height: `${36 * vZoom}px` }}
+            style={{ height: `${72 * vZoom}px` }}
           >
             <span className="absolute top-1 left-2 text-text-dim text-[9px] uppercase tracking-wider font-bold pointer-events-none">
               Audio

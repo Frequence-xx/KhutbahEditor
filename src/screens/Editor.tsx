@@ -174,11 +174,35 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
   ]);
 
   useEffect(() => {
-    if (!project || project.proxyPath || !window.khutbah) return;
+    if (!project || !window.khutbah) return;
     let cancelled = false;
     (async () => {
-      // Probe first: if already scrub-friendly, point proxyPath at the source
-      // and skip the ~30s proxy-gen step entirely.
+      // Validate any existing proxyPath: if the file's missing or not
+      // Chromium-friendly (e.g. 10-bit yuv420p10le from before the
+      // Phase 2.1 ffmpeg fix), invalidate it and regenerate. Without
+      // this, a stale proxy path persists across app restarts and the
+      // editor renders an undecodable file forever.
+      if (project.proxyPath) {
+        let valid = false;
+        try {
+          valid = await window.khutbah!.pipeline.call<boolean>(
+            'paths.is_chromium_friendly', { path: project.proxyPath }
+          );
+        } catch {
+          valid = false;
+        }
+        if (cancelled) return;
+        if (valid) {
+          setProxyReady(true);
+          return;
+        }
+        console.warn('[editor] stored proxy is stale or unfriendly, regenerating', {
+          proxyPath: project.proxyPath,
+        });
+        updateProject(project.id, { proxyPath: undefined, proxySkipped: false });
+        return;
+      }
+      // Probe source: if already scrub-friendly, skip proxy gen entirely.
       let friendly = false;
       try {
         friendly = await window.khutbah!.pipeline.call<boolean>(

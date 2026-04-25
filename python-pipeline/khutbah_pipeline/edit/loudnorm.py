@@ -1,18 +1,28 @@
 import json
 import re
 import subprocess
-from typing import Any
+from typing import Any, Optional
 from khutbah_pipeline.util.ffmpeg import FFMPEG
 
 
-def measure_loudness(src: str) -> dict[str, Any]:
+def measure_loudness(
+    src: str,
+    start: Optional[float] = None,
+    end: Optional[float] = None,
+) -> dict[str, Any]:
     """Pass 1: measure integrated loudness, true peak, LRA, threshold, offset.
 
-    FFmpeg's loudnorm filter prints a JSON block to stderr after processing.
-    Returns the parsed values for use in pass 2.
+    If start/end are provided, measure ONLY that segment (the same one that will
+    be exported by smart_cut). Measuring the full source and applying to a
+    segment produces wrong loudness when source loudness varies across regions.
     """
-    cmd = [
-        FFMPEG, "-hide_banner", "-i", src,
+    cmd = [FFMPEG, "-hide_banner"]
+    if start is not None:
+        cmd += ["-ss", str(start)]
+    if start is not None and end is not None:
+        cmd += ["-t", str(end - start)]
+    cmd += [
+        "-i", src,
         "-af", "loudnorm=I=-14:TP=-1:LRA=11:print_format=json",
         "-f", "null", "-",
     ]

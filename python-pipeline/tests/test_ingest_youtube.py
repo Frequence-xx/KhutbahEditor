@@ -3,6 +3,32 @@ import pytest
 from khutbah_pipeline.ingest import youtube
 
 
+def test_rejects_leading_dash_url():
+    """yt-dlp option injection: URLs starting with '-' would be parsed as flags."""
+    with pytest.raises(ValueError, match="cannot start with"):
+        youtube.info_only("--exec=sh -c 'pwn'")
+
+
+def test_rejects_non_youtube_host():
+    """URL must be a YouTube domain."""
+    with pytest.raises(ValueError, match="YouTube domain"):
+        youtube.info_only("https://evil.com/watch?v=123")
+
+
+def test_accepts_youtube_dot_com():
+    """Standard YouTube URLs pass validation."""
+    mock_run = MagicMock(return_value=MagicMock(stdout='{"id":"abc"}', returncode=0))
+    with patch("khutbah_pipeline.ingest.youtube.subprocess.run", mock_run):
+        youtube.info_only("https://www.youtube.com/watch?v=abc")
+
+
+def test_accepts_youtu_dot_be_short_url():
+    """Short youtu.be URLs pass validation."""
+    mock_run = MagicMock(return_value=MagicMock(stdout='{"id":"abc"}', returncode=0))
+    with patch("khutbah_pipeline.ingest.youtube.subprocess.run", mock_run):
+        youtube.info_only("https://youtu.be/abc")
+
+
 def test_info_only_returns_parsed_json():
     fake_yt_dlp_output = '{"title": "Test Video", "duration": 1234, "id": "abc"}'
     mock_run = MagicMock()
@@ -18,7 +44,7 @@ def test_info_only_raises_on_yt_dlp_failure():
     mock_run = MagicMock(side_effect=subprocess.CalledProcessError(1, ["yt-dlp"]))
     with patch("khutbah_pipeline.ingest.youtube.subprocess.run", mock_run):
         with pytest.raises(subprocess.CalledProcessError):
-            youtube.info_only("https://invalid")
+            youtube.info_only("https://www.youtube.com/watch?v=invalid")
 
 
 def test_download_raises_on_nonzero_exit():
@@ -31,7 +57,7 @@ def test_download_raises_on_nonzero_exit():
     mock_proc.returncode = 1
     with patch("khutbah_pipeline.ingest.youtube.subprocess.Popen", return_value=mock_proc):
         with pytest.raises(RuntimeError, match="yt-dlp failed"):
-            youtube.download("https://invalid", "/tmp")
+            youtube.download("https://www.youtube.com/watch?v=invalid", "/tmp")
 
 
 def test_download_returns_destination_path():
@@ -45,5 +71,5 @@ def test_download_returns_destination_path():
     mock_proc.wait = MagicMock()
     mock_proc.returncode = 0
     with patch("khutbah_pipeline.ingest.youtube.subprocess.Popen", return_value=mock_proc):
-        result = youtube.download("https://test", "/tmp")
+        result = youtube.download("https://www.youtube.com/watch?v=abc", "/tmp")
     assert result == "/tmp/Test [abc].mp4"

@@ -3,22 +3,48 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import Any, Callable, Optional
+from urllib.parse import urlparse
 
 YT_DLP: str = shutil.which("yt-dlp") or "yt-dlp"
 
+ALLOWED_HOSTS = {"www.youtube.com", "youtube.com", "m.youtube.com", "youtu.be"}
+
+
+def _validate_youtube_url(url: str) -> None:
+    """Reject URLs that aren't standard YouTube + reject leading-dash strings.
+
+    Defense against yt-dlp option-flag injection: a URL like '--exec=sh -c ...'
+    would be parsed by yt-dlp as a flag rather than a URL, allowing arbitrary
+    command execution. We reject leading dashes outright and require a YouTube
+    host.
+    """
+    if not url or url.startswith("-"):
+        raise ValueError(
+            f"Invalid YouTube URL (cannot start with '-' to prevent option injection): {url[:50]}"
+        )
+    try:
+        parsed = urlparse(url)
+    except (ValueError, TypeError) as e:
+        raise ValueError(f"Cannot parse URL: {e}") from e
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"URL must use http or https scheme, got: {parsed.scheme}")
+    if parsed.hostname not in ALLOWED_HOSTS:
+        raise ValueError(
+            f"URL host must be a YouTube domain ({sorted(ALLOWED_HOSTS)}), got: {parsed.hostname}"
+        )
+
 
 def info_only(url: str) -> dict[str, Any]:
-    """Probe YouTube URL without downloading. Returns title, duration, thumbnail.
-
-    Raises subprocess.CalledProcessError if yt-dlp fails (e.g., invalid URL,
-    private video, network error). The renderer's IPC layer surfaces this
-    as a JSON-RPC error.
-    """
+    """Probe YouTube URL without downloading. Validates URL is YouTube + non-injecting."""
+    _validate_youtube_url(url)
+    # `--` separator marks end of options; subsequent args are positional URLs.
+    # Defense in depth even though _validate_youtube_url already rejects -prefixed URLs.
     r = subprocess.run(
-        [YT_DLP, "-J", "--no-warnings", url],
+        [YT_DLP, "-J", "--no-warnings", "--", url],
         check=True,
         capture_output=True,
         text=True,
+        timeout=60,
     )
     return json.loads(r.stdout)
 
@@ -28,21 +54,20 @@ def download(
     output_dir: str,
     progress_cb: Optional[Callable[[dict[str, Any]], None]] = None,
 ) -> str:
-    """Download best mp4 to output_dir. Returns path to downloaded file.
-
-    Note: yt-dlp's progress events are line-streamed; we parse them for
-    optional progress reporting.
-    """
+    """Download best mp4 to output_dir. Validates URL is YouTube + non-injecting."""
+    _validate_youtube_url(url)
     out_template = str(Path(output_dir) / "%(title)s [%(id)s].%(ext)s")
     cmd = [
         YT_DLP, "-f", "best[ext=mp4]/best", "-o", out_template,
-        "--no-playlist", url,
+        "--no-playlist",
     ]
     if progress_cb:
         cmd += [
             "--progress-template",
             "download:%(progress.downloaded_bytes)s/%(progress.total_bytes)s",
         ]
+    # `--` separator before the URL.
+    cmd += ["--", url]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     out_path: Optional[str] = None
     if proc.stdout is None:
@@ -52,9 +77,7 @@ def download(
             try:
                 done_str, total_str = line.replace("download:", "").strip().split("/")
                 if progress_cb and total_str != "NA":
-                    progress_cb(
-                        {"stage": "download", "progress": int(done_str) / int(total_str)}
-                    )
+                    progress_cb({"stage": "download", "progress": int(done_str) / int(total_str)})
             except (ValueError, ZeroDivisionError):
                 pass
         if "[download] Destination:" in line:

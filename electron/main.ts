@@ -73,8 +73,11 @@ function createWindow() {
         event.preventDefault();
         return;
       }
+      // Use a trailing slash on the prefix so sibling directories like
+      // `dist-web2/` or `dist-web-evil/` can't pass the prefix check.
       const distWebPathname = pathToFileURL(path.join(__dirname, '../dist-web')).pathname;
-      if (!parsed.pathname.startsWith(distWebPathname)) {
+      const allowedPrefix = distWebPathname.endsWith('/') ? distWebPathname : distWebPathname + '/';
+      if (parsed.pathname !== distWebPathname && !parsed.pathname.startsWith(allowedPrefix)) {
         event.preventDefault();
       }
     }
@@ -96,13 +99,11 @@ function buildSidecarEnv(): Record<string, string> {
   // Augment PATH so the Python sidecar's shutil.which() finds bundled binaries.
   // In dev, fall back to the system PATH (assume system ffmpeg/yt-dlp exist).
   if (!isDev) {
-    // Determine OS/arch — must match how fetch-resources.sh laid them out.
-    const osDir =
-      process.platform === 'darwin' ? 'macOS' :
-      process.platform === 'win32' ? 'Windows' :
-      'Linux';
-    const archDir = process.arch === 'arm64' ? 'arm64' : 'x64';
-    const binDir = path.join(process.resourcesPath, 'bin', osDir, archDir);
+    // electron-builder.json copies `resources/bin/${os}/${arch}` (the
+    // platform-specific subdirectory) directly to `<resourcesPath>/bin/`,
+    // flattening the structure. So PATH points at `<resourcesPath>/bin/`,
+    // NOT a nested `bin/<OS>/<arch>/` subpath.
+    const binDir = path.join(process.resourcesPath, 'bin');
     const pathSep = process.platform === 'win32' ? ';' : ':';
     env.PATH = `${binDir}${pathSep}${process.env.PATH ?? ''}`;
   }

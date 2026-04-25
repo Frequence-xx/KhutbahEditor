@@ -26,7 +26,38 @@ export const VideoPreview = forwardRef<VideoHandle, Props>(function VideoPreview
       play: () => videoRef.current?.play(),
       pause: () => videoRef.current?.pause(),
       seek: (t: number) => {
-        if (videoRef.current) videoRef.current.currentTime = t;
+        const v = videoRef.current;
+        if (!v) {
+          console.log('[seek] no video ref');
+          return;
+        }
+        // readyState semantics:
+        //   0 = HAVE_NOTHING, 1 = HAVE_METADATA, 2 = HAVE_CURRENT_DATA,
+        //   3 = HAVE_FUTURE_DATA, 4 = HAVE_ENOUGH_DATA
+        // Setting currentTime requires ≥ HAVE_METADATA. Below that the
+        // assignment is silently ignored — explains "click seems to do
+        // nothing" when the timeline is clicked before the video has
+        // loaded its metadata.
+        const before = v.currentTime;
+        if (v.readyState < 1) {
+          console.log('[seek] video not ready, queuing', { t, readyState: v.readyState });
+          const onReady = () => {
+            v.removeEventListener('loadedmetadata', onReady);
+            v.currentTime = t;
+            console.log('[seek] applied after metadata loaded', { t, applied: v.currentTime });
+          };
+          v.addEventListener('loadedmetadata', onReady);
+          return;
+        }
+        v.currentTime = t;
+        console.log('[seek]', {
+          requested: t,
+          before,
+          after: v.currentTime,
+          duration: v.duration,
+          readyState: v.readyState,
+          src: v.currentSrc,
+        });
       },
       el: videoRef.current,
     }),

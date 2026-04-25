@@ -61,12 +61,37 @@ export function Timeline({
     return duration > 0 ? (t / duration) * 100 : 0;
   }
 
+  // Visible click feedback so we can SEE whether the handler runs at all.
+  // {x: pixel within track, t: seek time} — cleared after 700ms.
+  const [lastClick, setLastClick] = useState<{ x: number; t: number; ts: number } | null>(null);
+
   function onTrackClick(e: MouseEvent<HTMLDivElement>): void {
-    if (dragging.current || scrubbing.current) return;
-    const rect = trackRef.current!.getBoundingClientRect();
-    const t = ((e.clientX - rect.left) / rect.width) * duration;
+    if (dragging.current || scrubbing.current) {
+      console.log('[timeline-click] suppressed (dragging/scrubbing)', {
+        dragging: dragging.current, scrubbing: scrubbing.current,
+      });
+      return;
+    }
+    if (!trackRef.current) {
+      console.log('[timeline-click] suppressed (no track ref)');
+      return;
+    }
+    const rect = trackRef.current.getBoundingClientRect();
+    const xWithin = e.clientX - rect.left;
+    const frac = rect.width > 0 ? xWithin / rect.width : 0;
+    const t = frac * duration;
+    console.log('[timeline-click]', {
+      x: xWithin, frac, duration, t, rectWidth: rect.width, rectLeft: rect.left,
+    });
+    setLastClick({ x: xWithin, t, ts: Date.now() });
     onSeek(t);
   }
+
+  useEffect(() => {
+    if (!lastClick) return;
+    const id = window.setTimeout(() => setLastClick(null), 700);
+    return () => window.clearTimeout(id);
+  }, [lastClick]);
 
   function onPlayheadMouseDown(e: MouseEvent): void {
     e.stopPropagation();
@@ -408,6 +433,20 @@ export function Timeline({
               </div>
             )}
           </div>
+          {/* Visible click flash — appears for 700ms at the click position
+              so the user can confirm the click registered, even if the
+              video is slow to seek. Cyan so it stands out against amber
+              playhead and warm timeline colors. */}
+          {lastClick && (
+            <div
+              className="absolute top-0 bottom-0 w-0.5 bg-cyan-400 pointer-events-none animate-pulse"
+              style={{ left: `${lastClick.x}px` }}
+            >
+              <div className="absolute -top-6 left-1/2 -translate-x-1/2 px-2 py-0.5 bg-cyan-400 text-bg-3 text-[10px] font-mono rounded whitespace-nowrap">
+                seek → {fmtTime(lastClick.t)}
+              </div>
+            </div>
+          )}
           {/* Playhead — spans ruler + segments + audio so the cursor reads
               as one shared timeline position regardless of which lane the
               user is looking at. */}

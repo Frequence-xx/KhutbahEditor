@@ -627,7 +627,14 @@ export function Editor({ projectId, onBack, onUpload }: Props) {
       </div>
       <Timeline
         currentTime={currentTime}
-        onSeek={(t) => videoRef.current?.seek(t)}
+        onSeek={(t) => {
+          // Update the playhead state synchronously so the cursor jumps the
+          // instant the click is processed. Without this we'd wait for the
+          // video element's next timeupdate (max ~250ms later) before the
+          // cursor moves — the click feels broken even when seek worked.
+          setCurrentTime(t);
+          videoRef.current?.seek(t);
+        }}
         onPlayPause={() => {
           if (isPlaying) videoRef.current?.pause();
           else videoRef.current?.play();

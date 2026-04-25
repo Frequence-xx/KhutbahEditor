@@ -18,6 +18,8 @@ export function Editor({ projectId, onBack }: Props) {
   const videoRef = useRef<VideoHandle>(null);
   const [currentTime, setCurrentTime] = useState<number>(0);
   const reset = useMarkers((s) => s.reset);
+  const setMarker = useMarkers((s) => s.setMarker);
+  const setDuration = useMarkers((s) => s.setDuration);
   const markers = useMarkers((s) => s.markers);
   const [exporting, setExporting] = useState<{ p1: number; p2: number } | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -27,9 +29,30 @@ export function Editor({ projectId, onBack }: Props) {
   useEffect(() => { loadSettings(); }, [loadSettings]);
 
   useEffect(() => {
-    if (project) reset(project.duration);
-    // intentional: only re-init markers when the project ID or duration changes
-  }, [project?.id, project?.duration, reset]);
+    if (!project) return;
+    if (project.part1 && project.part2) {
+      // Markers were pre-filled by detection (Processing) or a prior export.
+      // Set in reverse order to avoid clamping (each marker's max is the next
+      // marker's current value; setting largest first keeps constraints valid).
+      setDuration(project.duration);
+      setMarker('p2End', project.part2.end);
+      setMarker('p2Start', project.part2.start);
+      setMarker('p1End', project.part1.end);
+      setMarker('p1Start', project.part1.start);
+    } else {
+      reset(project.duration);
+    }
+  }, [
+    project?.id,
+    project?.duration,
+    project?.part1?.start,
+    project?.part1?.end,
+    project?.part2?.start,
+    project?.part2?.end,
+    reset,
+    setMarker,
+    setDuration,
+  ]);
 
   useEffect(() => {
     if (!project || project.proxyPath || !window.khutbah) return;

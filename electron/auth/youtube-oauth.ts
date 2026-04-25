@@ -9,9 +9,21 @@ import { accounts, YouTubeAccount } from './accounts.js';
 // the client ID is meant to ship in the binary. Frequence-xx Google Cloud
 // Desktop application credentials. The .env override is kept for local
 // development across multiple OAuth clients.
+//
+// Per Google's Desktop OAuth docs (https://developers.google.com/identity/protocols/oauth2/native-app):
+// Desktop client IDs are paired with a "client secret" that is publicly distributable
+// (it's not a real secret in the cryptographic sense — it ships in the binary). Google's
+// token endpoint REQUIRES the client_secret field even when PKCE is used; the secret
+// identifies the client but is not used for authentication when code_verifier is present.
+//
+// PUBLIC_DESKTOP_CLIENT_SECRET below is the corresponding "secret" for the Desktop client
+// referenced by PUBLIC_DESKTOP_CLIENT_ID. Both are embedded by design.
 const PUBLIC_DESKTOP_CLIENT_ID = '397103661369-ekgvoaahrecmk61ncp67oor8kl678rjq.apps.googleusercontent.com';
+const PUBLIC_DESKTOP_CLIENT_SECRET = '__SET_BY_ENV__';
 const CLIENT_ID: string =
   process.env.GOOGLE_OAUTH_CLIENT_ID || PUBLIC_DESKTOP_CLIENT_ID;
+const CLIENT_SECRET: string =
+  process.env.GOOGLE_OAUTH_CLIENT_SECRET || PUBLIC_DESKTOP_CLIENT_SECRET;
 const SCOPES: string = [
   'https://www.googleapis.com/auth/youtube.upload',
   'https://www.googleapis.com/auth/youtube',
@@ -149,6 +161,7 @@ export async function signInWithGoogle(): Promise<OAuthTokens> {
     body: new URLSearchParams({
       grant_type: 'authorization_code',
       client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET,
       code,
       code_verifier: verifier,
       redirect_uri: redirectUri,
@@ -216,6 +229,7 @@ export async function ensureAccessToken(channelId: string): Promise<OAuthTokens>
     body: new URLSearchParams({
       grant_type: 'refresh_token',
       client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET,
       refresh_token: refresh,
     }),
   });

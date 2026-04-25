@@ -1,5 +1,5 @@
 import { spawn, ChildProcess } from 'child_process';
-import { StdioRpc } from './rpc';
+import { StdioRpc } from './rpc.js';
 
 export type SidecarOpts = {
   pythonExecutable: string;

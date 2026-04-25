@@ -2,26 +2,26 @@
 import json
 import sys
 import traceback
-from typing import Callable, Any
+from typing import Callable, Any, TextIO
 
 _METHODS: dict[str, Callable[..., Any]] = {}
 
-def register(name: str):
+def register(name: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
         _METHODS[name] = fn
         return fn
     return deco
 
 class RpcServer:
-    def __init__(self, in_stream=sys.stdin, out_stream=sys.stdout):
+    def __init__(self, in_stream: TextIO = sys.stdin, out_stream: TextIO = sys.stdout) -> None:
         self.in_ = in_stream
         self.out = out_stream
 
-    def _write(self, payload: dict):
+    def _write(self, payload: dict[str, Any]) -> None:
         self.out.write(json.dumps(payload) + "\n")
         self.out.flush()
 
-    def _handle(self, req: dict):
+    def _handle(self, req: dict[str, Any]) -> dict[str, Any]:
         rid = req.get("id")
         method = req.get("method")
         params = req.get("params") or {}
@@ -48,6 +48,6 @@ class RpcServer:
         self._write(self._handle(req))
         return True
 
-    def run_forever(self):
+    def run_forever(self) -> None:
         while self.run_one():
             pass

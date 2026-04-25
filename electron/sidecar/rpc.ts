@@ -50,7 +50,7 @@ export class StdioRpc {
     let parsed: unknown;
     try {
       parsed = JSON.parse(line);
-    } catch (e) {
+    } catch {
       process.stderr.write(`[sidecar][rpc] dropped malformed line (JSON parse error): ${line}\n`);
       return;
     }

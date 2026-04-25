@@ -38,6 +38,10 @@ resources/models/
 # electron-builder output
 release/
 
+# Playwright
+test-results/
+playwright-report/
+
 # Logs
 *.log
 

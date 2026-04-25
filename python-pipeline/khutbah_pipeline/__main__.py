@@ -130,7 +130,7 @@ def _detect(
     `model_dir` defaults to:
     1. KHUTBAH_MODEL_DIR env override (used by Electron main to pass the
        packaged path — set in electron/main.ts)
-    2. ../resources/models/whisper-large-v3 relative to cwd (dev path)
+    2. ../resources/models/whisper-tiny relative to cwd (dev path)
 
     `device` defaults to:
     1. KHUTBAH_COMPUTE_DEVICE env override (set by Electron main from settingsStore)
@@ -139,7 +139,7 @@ def _detect(
     if not model_dir:
         model_dir = os.environ.get(
             "KHUTBAH_MODEL_DIR",
-            "../resources/models/whisper-large-v3",
+            "../resources/models/whisper-tiny",
         )
     if not device:
         device = os.environ.get("KHUTBAH_COMPUTE_DEVICE", "auto")

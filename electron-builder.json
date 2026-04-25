@@ -14,7 +14,7 @@
   "extraResources": [
     { "from": "python-pipeline/dist/khutbah_pipeline", "to": "python-pipeline" },
     { "from": "resources/bin/${os}/${arch}", "to": "bin", "filter": ["**/*"] },
-    { "from": "resources/models/whisper-large-v3", "to": "models/whisper-large-v3", "filter": ["**/*"] }
+    { "from": "resources/models/whisper-tiny", "to": "models/whisper-tiny", "filter": ["**/*"] }
   ],
   "asar": true,
   "asarUnpack": ["**/*.{node,dll,dylib,so}"],

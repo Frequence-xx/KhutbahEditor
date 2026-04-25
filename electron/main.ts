@@ -124,11 +124,11 @@ function buildSidecarEnv(): Record<string, string> {
   }
 
   // Tell the Python sidecar where the bundled Whisper model lives.
-  // Packaged: <resourcesPath>/models/whisper-large-v3/ (per electron-builder.json)
-  // Dev: <repo>/resources/models/whisper-large-v3/ (downloaded by fetch-resources.sh)
+  // Packaged: <resourcesPath>/models/whisper-tiny/ (per electron-builder.json)
+  // Dev: <repo>/resources/models/whisper-tiny/ (downloaded by fetch-resources.sh)
   env.KHUTBAH_MODEL_DIR = isDev
-    ? path.resolve('resources/models/whisper-large-v3')
-    : path.join(process.resourcesPath, 'models', 'whisper-large-v3');
+    ? path.resolve('resources/models/whisper-tiny')
+    : path.join(process.resourcesPath, 'models', 'whisper-tiny');
 
   // Pass the user's compute-device preference so _resolve_device honours it.
   env.KHUTBAH_COMPUTE_DEVICE = settingsStore.get('computeDevice');

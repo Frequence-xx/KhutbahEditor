@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useProjects } from '../store/projects';
 import { VideoPreview, VideoHandle } from '../editor/VideoPreview';
 import { Button } from '../components/ui/Button';
+import { Timeline } from '../editor/Timeline';
+import { useMarkers } from '../editor/markersStore';
 
 type Props = { projectId: string; onBack: () => void };
 
@@ -12,6 +14,12 @@ export function Editor({ projectId, onBack }: Props) {
   const [error, setError] = useState<string | null>(null);
   const videoRef = useRef<VideoHandle>(null);
   const [currentTime, setCurrentTime] = useState<number>(0);
+  const reset = useMarkers((s) => s.reset);
+
+  useEffect(() => {
+    if (project) reset(project.duration);
+    // intentional: only re-init markers when the project ID or duration changes
+  }, [project?.id, project?.duration, reset]);
 
   useEffect(() => {
     if (!project || project.proxyPath || !window.khutbah) return;
@@ -57,9 +65,13 @@ export function Editor({ projectId, onBack }: Props) {
           <div className="mt-3 text-text-muted text-xs font-mono">Time: {currentTime.toFixed(2)} s</div>
         </div>
         <div className="bg-bg-2 p-4 rounded-r-lg border-y border-r border-border-strong">
-          <div className="text-text-muted uppercase text-xs tracking-wider mb-3">Markers (next task)</div>
+          <div className="text-text-muted uppercase text-xs tracking-wider mb-3">Markers</div>
         </div>
       </div>
+      <Timeline
+        currentTime={currentTime}
+        onSeek={(t) => videoRef.current?.seek(t)}
+      />
     </div>
   );
 }

@@ -31,13 +31,11 @@ function createWindow() {
   // Security hardening: deny all new-window requests; route allowed external
   // URLs through the OS browser via shell.openExternal.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    // Allow YouTube links to open in the default browser; deny everything else.
+    // Allow YouTube watch/embed links to open in the default browser; deny everything else.
     try {
       const parsed = new URL(url);
-      if (
-        parsed.protocol === 'https:' &&
-        ['www.youtube.com', 'youtube.com', 'm.youtube.com', 'youtu.be'].includes(parsed.hostname)
-      ) {
+      const allowedHosts = new Set(['www.youtube.com', 'youtube.com', 'm.youtube.com', 'youtu.be']);
+      if (parsed.protocol === 'https:' && allowedHosts.has(parsed.hostname)) {
         shell.openExternal(url);
       }
     } catch {
@@ -47,12 +45,29 @@ function createWindow() {
   });
 
   // Block any in-window navigation away from the local Vite dev server / packaged file.
+  // Uses URL.origin comparison (not startsWith) to defeat subdomain and userinfo tricks:
+  //   http://localhost:5173.evil.test/ → origin "http://localhost:5173.evil.test" ≠ allowed
+  //   http://localhost:5173@evil.test/ → origin "http://evil.test"               ≠ allowed
   mainWindow.webContents.on('will-navigate', (event, url) => {
-    const allowed = isDev
-      ? url.startsWith('http://localhost:5173')
-      : url.startsWith('file://');
-    if (!allowed) {
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
       event.preventDefault();
+      return;
+    }
+    if (isDev) {
+      // URL.origin includes scheme+host+port — exact match only.
+      if (parsed.origin !== 'http://localhost:5173') {
+        event.preventDefault();
+      }
+    } else {
+      // file:// origin is "null" in WHATWG URL semantics. Require protocol === 'file:'
+      // AND that the path resolves inside the packaged app's dist-web/ folder.
+      const distWebPath = path.join(__dirname, '../dist-web');
+      if (parsed.protocol !== 'file:' || !parsed.pathname.startsWith(distWebPath)) {
+        event.preventDefault();
+      }
     }
   });
 

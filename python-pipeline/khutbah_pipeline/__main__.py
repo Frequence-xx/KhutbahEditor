@@ -1,12 +1,19 @@
 """Entry point — starts the JSON-RPC server on stdin/stdout."""
 import os
-from typing import Any
+from typing import Any, Optional
 from khutbah_pipeline.rpc import RpcServer, register
 from khutbah_pipeline.ingest.local import probe_local
 from khutbah_pipeline.ingest.youtube import info_only, download
 from khutbah_pipeline.edit.proxy import generate_proxy
 from khutbah_pipeline.edit.smartcut import smart_cut
 from khutbah_pipeline.detect.pipeline import run_detection_pipeline
+from khutbah_pipeline.upload.youtube_api import upload_video, set_thumbnail, update_metadata
+from khutbah_pipeline.upload.playlists import (
+    list_playlists,
+    create_playlist,
+    add_video_to_playlist,
+    resolve_or_create_playlist,
+)
 
 @register("ping")
 def ping() -> dict[str, object]:
@@ -70,6 +77,69 @@ def _detect(audio_path: str, model_dir: str = "") -> dict[str, Any]:
             "../resources/models/whisper-large-v3",
         )
     return run_detection_pipeline(audio_path, model_dir)
+
+@register("upload.video")
+def _upload(
+    access_token: str,
+    file_path: str,
+    title: str,
+    description: str,
+    tags: list[str],
+    category_id: str = "27",
+    privacy_status: str = "unlisted",
+    self_declared_made_for_kids: bool = False,
+    default_audio_language: str = "ar",
+) -> dict[str, Any]:
+    return upload_video(
+        access_token, file_path, title, description, tags,
+        category_id, privacy_status, self_declared_made_for_kids, default_audio_language,
+    )
+
+
+@register("upload.thumbnail")
+def _thumb(access_token: str, video_id: str, thumbnail_path: str) -> dict[str, Any]:
+    return set_thumbnail(access_token, video_id, thumbnail_path)
+
+
+@register("upload.update_metadata")
+def _update(
+    access_token: str,
+    video_id: str,
+    snippet: Optional[dict[str, Any]] = None,
+    status: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    return update_metadata(access_token, video_id, snippet, status)
+
+
+@register("playlists.list")
+def _list_playlists(access_token: str) -> list[dict[str, Any]]:
+    return list_playlists(access_token)
+
+
+@register("playlists.create")
+def _create_playlist(
+    access_token: str,
+    title: str,
+    description: str = "",
+    privacy: str = "unlisted",
+) -> dict[str, Any]:
+    return create_playlist(access_token, title, description, privacy)
+
+
+@register("playlists.add_video")
+def _add_video(access_token: str, playlist_id: str, video_id: str) -> dict[str, Any]:
+    return add_video_to_playlist(access_token, playlist_id, video_id)
+
+
+@register("playlists.resolve_or_create")
+def _resolve(
+    access_token: str,
+    name_or_id: Optional[str],
+    auto_create: bool = True,
+    visibility: str = "unlisted",
+) -> dict[str, Optional[str]]:
+    return {"playlist_id": resolve_or_create_playlist(access_token, name_or_id, auto_create, visibility)}
+
 
 if __name__ == "__main__":
     RpcServer().run_forever()

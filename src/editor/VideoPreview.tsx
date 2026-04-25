@@ -81,7 +81,15 @@ export const VideoPreview = forwardRef<VideoHandle, Props>(function VideoPreview
   }, [src]);
 
   return (
-    <div className="bg-black rounded-md aspect-video relative border border-border-strong overflow-hidden">
+    // Cap the preview at ~280px tall so the editor keeps the timeline +
+    // export bar visible without scrolling. aspectRatio keeps width in
+    // sync with the cap; mx-auto centers it in the column. Native HTML5
+    // controls include a fullscreen button when the user does need a
+    // bigger view.
+    <div
+      className="bg-black rounded-md relative border border-border-strong overflow-hidden mx-auto"
+      style={{ aspectRatio: '16 / 9', maxHeight: '280px', maxWidth: '100%' }}
+    >
       <video ref={videoRef} src={src} className="w-full h-full" controls preload="metadata" />
     </div>
   );

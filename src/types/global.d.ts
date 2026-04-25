@@ -1,4 +1,7 @@
 export {};
+
+import type { AppSettings } from '../../electron/store';
+
 declare global {
   interface Window {
     khutbah?: {
@@ -8,6 +11,10 @@ declare global {
       paths: {
         defaultOutputDir: () => Promise<string>;
         ensureDir: (dir: string) => Promise<string>;
+      };
+      settings: {
+        get: () => Promise<AppSettings>;
+        set: (patch: Partial<AppSettings>) => Promise<AppSettings>;
       };
     };
   }

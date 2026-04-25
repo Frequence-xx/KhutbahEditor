@@ -3,10 +3,15 @@ import { TitleBar } from './components/TitleBar';
 import { Library } from './screens/Library';
 import { NewKhutbah } from './screens/NewKhutbah';
 import { Editor } from './screens/Editor';
+import { Settings } from './screens/Settings';
 import { useProjects } from './store/projects';
 import { useIpcOnce } from './hooks/useIpc';
 
-type Screen = { name: 'library' } | { name: 'new' } | { name: 'editor'; projectId: string };
+type Screen =
+  | { name: 'library' }
+  | { name: 'new' }
+  | { name: 'editor'; projectId: string }
+  | { name: 'settings' };
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>({ name: 'library' });
@@ -25,11 +30,22 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col bg-bg-1 text-text">
-      <TitleBar right={
-        <span className={data?.ok ? 'text-green' : 'text-text-muted'} role="status" aria-live="polite">
-          {data?.ok ? '● Pipeline ready' : '… connecting'}
-        </span>
-      } />
+      <TitleBar
+        right={
+          <div className="flex items-center gap-3">
+            <span className={data?.ok ? 'text-green' : 'text-text-muted'} role="status" aria-live="polite">
+              {data?.ok ? '● Pipeline ready' : '… connecting'}
+            </span>
+            <button
+              onClick={() => setScreen({ name: 'settings' })}
+              className="text-text-muted hover:text-text-strong"
+              aria-label="Settings"
+            >
+              ⚙
+            </button>
+          </div>
+        }
+      />
       {screen.name === 'library' && (
         <Library
           onNewProject={() => setScreen({ name: 'new' })}
@@ -45,6 +61,7 @@ export default function App() {
           onBack={() => setScreen({ name: 'library' })}
         />
       )}
+      {screen.name === 'settings' && <Settings onBack={() => setScreen({ name: 'library' })} />}
     </div>
   );
 }

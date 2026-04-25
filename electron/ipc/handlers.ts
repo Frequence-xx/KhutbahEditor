@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import fs from 'fs/promises';
 import { SidecarManager } from '../sidecar/manager.js';
+import { settingsStore, type AppSettings } from '../store.js';
 
 export function registerIpcHandlers(sidecar: SidecarManager): void {
   ipcMain.handle('pipeline:call', async (_e, args: { method: string; params?: object }) => {
@@ -28,5 +29,12 @@ export function registerIpcHandlers(sidecar: SidecarManager): void {
   ipcMain.handle('paths:ensureDir', async (_e, dir: string) => {
     await fs.mkdir(dir, { recursive: true });
     return dir;
+  });
+  ipcMain.handle('settings:get', () => settingsStore.store);
+  ipcMain.handle('settings:set', (_e, patch: Partial<AppSettings>) => {
+    for (const [k, v] of Object.entries(patch)) {
+      settingsStore.set(k as keyof AppSettings, v as never);
+    }
+    return settingsStore.store;
   });
 }

@@ -39,15 +39,41 @@ from khutbah_pipeline.util.keyframes import (
 SYNCNET_MIN_CONFIDENCE = 1.5
 
 
+def _syncnet_consensus(
+    samples: list[dict[str, Any]],
+    min_confidence: float = SYNCNET_MIN_CONFIDENCE,
+    min_consensus: int = 2,
+) -> Optional[int]:
+    """Return the median offset_ms across confident samples, or None.
+
+    Single-probe SyncNet is unreliable: a window where the camera is on
+    the audience or wide-shot returns low confidence and we silently
+    fall back to 0 ms — masking a real source-wide offset that other
+    windows agree on. Multi-window consensus surfaces the offset that
+    *most confident probes* report.
+
+    None means "auto-detect failed, caller should not silently apply 0":
+    the caller can decide whether to leave the source unmodified or
+    surface a 'needs manual offset' signal.
+    """
+    confident = [s for s in samples if s["confidence"] >= min_confidence]
+    if len(confident) < min_consensus:
+        return None
+    sorted_offsets = sorted(int(s["offset_ms"]) for s in confident)
+    return sorted_offsets[len(sorted_offsets) // 2]
+
+
 def _detect_av_offset(
     src: str,
     snap_start: float,
     snap_end: float,
     progress_cb: Optional[Callable[[dict[str, Any]], None]] = None,
+    n_probes: int = 5,
+    probe_duration: float = 6.0,
 ) -> int:
-    """Probe SyncNet for the audio-leads-video offset in milliseconds.
+    """Probe SyncNet across N windows for the audio-leads-video offset.
 
-    Returns 0 if SyncNet is unavailable or confidence is too low.
+    Returns 0 if SyncNet is unavailable or no consensus emerges.
     """
     try:
         from khutbah_pipeline.util.syncnet_offset import (
@@ -59,25 +85,37 @@ def _detect_av_offset(
     except ImportError:
         return 0
 
-    if progress_cb:
-        progress_cb({
-            "stage": "export",
-            "message": "Detecting A/V sync offset (SyncNet)...",
-            "progress": 0.02,
-        })
-    # Probe in the middle of the cut where speech is most reliable.
     duration = snap_end - snap_start
-    probe_start = snap_start + max(4.0, duration / 2 - 4.0)
-    probe_duration = min(8.0, max(4.0, duration - 8.0))
-    if probe_duration < 4.0:
+    if duration < probe_duration * 2:
+        # Cut too short for multi-window — fall back to a single mid-cut probe
+        n_probes = 1
+
+    margin = max(4.0, probe_duration / 2)
+    inner = max(0.0, duration - 2 * margin)
+    if inner <= 0:
         return 0
-    try:
-        r = syncnet_offset(src, probe_start=probe_start, probe_duration=probe_duration)
-    except Exception:
-        return 0
-    if not r or r["confidence"] < SYNCNET_MIN_CONFIDENCE:
-        return 0
-    return int(r["offset_ms"])
+
+    samples: list[dict[str, Any]] = []
+    for i in range(n_probes):
+        if n_probes == 1:
+            t = snap_start + duration / 2 - probe_duration / 2
+        else:
+            t = snap_start + margin + inner * i / max(1, n_probes - 1)
+        if progress_cb:
+            progress_cb({
+                "stage": "export",
+                "message": f"Detecting A/V sync offset (SyncNet probe {i+1}/{n_probes})...",
+                "progress": 0.02 + 0.04 * (i + 1) / n_probes,
+            })
+        try:
+            r = syncnet_offset(src, probe_start=t, probe_duration=probe_duration)
+        except Exception:
+            continue
+        if r:
+            samples.append(r)
+
+    consensus = _syncnet_consensus(samples)
+    return int(consensus) if consensus is not None else 0
 
 
 def smart_cut(

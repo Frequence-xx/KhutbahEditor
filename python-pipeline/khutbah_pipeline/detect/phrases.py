@@ -58,11 +58,23 @@ ADHAN_END_AR: list[str] = [
 
 # Closing phrase library per language (per spec §4 stage 5).
 # All entries are pre-normalized to match the normalize_arabic() output.
+# Multiple variants per phrase cover whisper's mistranscriptions (e.g.
+# 'اللهم' → 'الله', missing 'و-' prefix, dropped final mim).
 CLOSINGS: dict[str, list[str]] = {
     "ar": [
+        # Quranic dua endings — long, distinctive
         "ربنا اتنا في الدنيا حسنه وفي الاخره حسنه",
         "واخر دعوانا ان الحمد لله رب العالمين",
         "سبحان ربك رب العزه عما يصفون",
+        # Tasbīḥ al-majlis: standard end-of-talk formula
+        "سبحانك اللهم وبحمدك",
+        "سبحانك الله وبحمدك",       # whisper sometimes transcribes اللهم as الله
+        "استغفرك واتوب اليك",        # final phrase before stepping down
+        # Common imam closings before iqāma
+        "بارك الله فيكم",
+        # Final salam — universal end-of-talk marker
+        "والسلام عليكم ورحمه الله",
+        "السلام عليكم ورحمه الله",
         "اقم الصلاه",
     ],
     "nl": [

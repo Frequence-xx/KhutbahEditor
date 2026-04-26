@@ -27,6 +27,23 @@ def anchor_confidence(words, anchor) -> Optional[float]:
     return sum(float(w["probability"]) for w in span) / n
 
 
+def anchor_score(words, anchor) -> Optional[float]:
+    """Score for a matched anchor: 0.5 baseline + up to 0.5 from word probs.
+
+    The matcher's substring containment after Arabic normalisation is
+    deterministic — if it matched, the canonical phrase IS in the word
+    sequence. Word probability is whisper's uncertainty about its own
+    transcription of those characters, not about whether the substring
+    matched. Treat the match as 50 % credit and let probabilities lift
+    the rest. Returns None when no anchor matched (caller decides what
+    to do with absence — usually combine_confidences with low_default).
+    """
+    raw = anchor_confidence(words, anchor)
+    if raw is None:
+        return None
+    return 0.5 + 0.5 * raw
+
+
 def combine_confidences(*scores, low_default: float = 0.3) -> float:
     present = [float(s) for s in scores if s is not None]
     if not present:

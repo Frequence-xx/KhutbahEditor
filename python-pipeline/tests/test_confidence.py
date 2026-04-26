@@ -85,3 +85,37 @@ def test_combine_handles_three_or_more() -> None:
 def test_combine_skips_none_among_many() -> None:
     out = combine_confidences(0.9, None, 0.5, None)
     assert out == pytest.approx(math.sqrt(0.9 * 0.5))
+
+
+# --- anchor_score: credit substring match ---------------------------------
+
+from khutbah_pipeline.detect.confidence import anchor_score
+
+
+def test_anchor_score_floors_at_half_for_matched_anchor():
+    """A matched anchor (substring containment is deterministic) gets 0.5
+    baseline credit even when whisper's per-word probabilities are zero.
+    Word probability quantifies whisper's uncertainty about its own
+    characters within the matched span — it's a lift, not the full score."""
+    words = [_w(0, 1, 0.0), _w(1, 2, 0.0)]
+    anchor = {"start_word_idx": 0, "end_word_idx": 1}
+    assert anchor_score(words, anchor) == pytest.approx(0.5)
+
+
+def test_anchor_score_full_credit_for_high_word_probs():
+    """Perfect word probs → score reaches 1.0 (capped)."""
+    words = [_w(0, 1, 1.0), _w(1, 2, 1.0)]
+    anchor = {"start_word_idx": 0, "end_word_idx": 1}
+    assert anchor_score(words, anchor) == pytest.approx(1.0)
+
+
+def test_anchor_score_linear_lift_from_word_probs():
+    """0.5 baseline + 0.5 * raw avg word prob."""
+    words = [_w(0, 1, 0.6), _w(1, 2, 0.4)]
+    anchor = {"start_word_idx": 0, "end_word_idx": 1}
+    assert anchor_score(words, anchor) == pytest.approx(0.75)
+
+
+def test_anchor_score_returns_none_for_missing_anchor():
+    """No match → no score (caller decides what to do with absence)."""
+    assert anchor_score([_w(0, 1, 0.9)], None) is None

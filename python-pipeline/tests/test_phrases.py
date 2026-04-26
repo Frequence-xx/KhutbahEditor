@@ -295,3 +295,73 @@ def test_part1_anchors_returns_none_when_neither_matches():
     anchors = find_part1_anchors(words)
     assert anchors["opening"] is None
     assert anchors["haaja"] is None
+
+
+# --- Closing dua: real Iziyi-source endings ---------------------------------
+
+def test_find_closing_subhanaka():
+    """Standard tasbīḥ al-majlis ending — extremely common khutbah close."""
+    words = _ar_words([
+        ("بارك", 100.0, 100.3),
+        ("الله", 100.4, 100.7),
+        ("فيكم", 100.8, 101.2),
+        ("سبحانك", 101.3, 101.7),
+        ("اللهم", 101.8, 102.1),
+        ("وبحمدك", 102.2, 102.7),
+    ])
+    match = find_last_closing(words, dominant_lang="ar")
+    assert match is not None
+    assert match["end_time"] >= 102.7
+
+
+def test_find_closing_baarakallaahu_feekum():
+    """Imam's closing 'بارك الله فيكم' — common transition out."""
+    words = _ar_words([
+        ("والحمد", 100.0, 100.3),
+        ("لله", 100.4, 100.7),
+        ("بارك", 105.0, 105.3),
+        ("الله", 105.4, 105.7),
+        ("فيكم", 105.8, 106.2),
+    ])
+    match = find_last_closing(words, dominant_lang="ar")
+    assert match is not None
+    assert match["end_time"] >= 106.2
+
+
+def test_find_closing_astaghfiruka_wa_atubu():
+    """The continuation of subḥānaka — '(أشهد أن لا إله إلا أنت) أستغفرك
+    وأتوب إليك'. Often the very last spoken phrase before the imam steps
+    down."""
+    words = _ar_words([
+        ("استغفرك", 200.0, 200.4),
+        ("واتوب", 200.5, 200.9),
+        ("اليك", 201.0, 201.4),
+    ])
+    match = find_last_closing(words, dominant_lang="ar")
+    assert match is not None
+    assert match["end_time"] >= 201.4
+
+
+def test_find_closing_final_salam():
+    """Final 'والسلام عليكم ورحمة الله' — universal end-of-talk marker."""
+    words = _ar_words([
+        ("والسلام", 300.0, 300.4),
+        ("عليكم", 300.5, 300.9),
+        ("ورحمه", 301.0, 301.4),
+        ("الله", 301.5, 301.9),
+    ])
+    match = find_last_closing(words, dominant_lang="ar")
+    assert match is not None
+    assert match["end_time"] >= 301.9
+
+
+def test_find_closing_subhanaka_with_allah_not_allahumma():
+    """Whisper sometimes transcribes 'اللهم' as 'الله' — both should match."""
+    words = _ar_words([
+        ("سبحانك", 100.0, 100.3),
+        ("الله", 100.4, 100.7),
+        ("وبحمدك", 100.8, 101.2),
+    ])
+    match = find_last_closing(words, dominant_lang="ar")
+    assert match is not None
+    assert match["end_time"] >= 101.2

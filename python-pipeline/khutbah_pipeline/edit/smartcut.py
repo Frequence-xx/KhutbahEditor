@@ -94,9 +94,15 @@ def smart_cut(
         "-c:v", "copy",
     ]
     if audio_filter is not None:
-        cmd += ["-af", audio_filter]
+        # aresample=async=1 keeps re-encoded audio locked to the
+        # stream-copied video PTS — without it, video (which carries
+        # source PTS from the keyframe) and audio (which the AAC
+        # encoder restarts at PTS=0) drift apart by the input-seek
+        # offset, producing 3-5 s lipsync error.
+        cmd += ["-af", f"{audio_filter},aresample=async=1"]
     cmd += [
         "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+        "-avoid_negative_ts", "make_zero",
         "-movflags", "+faststart",
     ]
     if progress_cb:

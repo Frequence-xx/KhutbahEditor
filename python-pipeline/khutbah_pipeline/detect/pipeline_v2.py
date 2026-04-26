@@ -32,6 +32,7 @@ from khutbah_pipeline.detect.phrases import (
     _find_phrase,
     OPENING_AR,
 )
+from khutbah_pipeline.detect.confidence import anchor_confidence, combine_confidences
 from khutbah_pipeline.util.ffmpeg import ffprobe_json
 
 
@@ -220,20 +221,26 @@ def run_pipeline_v2(
     closing = find_last_closing(words, dominant_lang="ar", search_from_word=p2_anchor_word_idx)
     if closing is not None:
         p2_end = min(duration, closing["end_time"] + DUA_END_BUFFER)
-        p2_conf = 0.90
         transcript_p2 = " ".join(
             w["word"] for w in words[max(0, len(words) - 12):]
         )
     else:
-        # No closing — use last confident word past p2_start
         confident = [
             w for w in words[p2_anchor_word_idx:] if w["probability"] > 0.5
         ]
         p2_end = (confident[-1]["end"] + 2.0) if confident else duration
-        p2_conf = 0.5
         transcript_p2 = ""
 
-    overall = min(p1_conf, p2_conf, 1.0)
+    # Part 2 confidence comes from the two anchor word-probability spans:
+    # the second "ان الحمد لله" opening and the closing dua. Geometric mean
+    # so a single weak anchor visibly drags the score down. low_default=0.3
+    # signals "no anchors at all" so the auto-pilot threshold (0.90) refuses.
+    p2_conf = combine_confidences(
+        anchor_confidence(words, second_opening),
+        anchor_confidence(words, closing),
+    )
+
+    overall = combine_confidences(p1_conf, p2_conf)
 
     _emit(progress_cb, {"stage": "done", "message": "Detection complete", "progress": 1.0})
 

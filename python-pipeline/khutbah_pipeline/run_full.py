@@ -16,7 +16,7 @@ import time
 from typing import Any, Callable, Optional
 
 from khutbah_pipeline.detect.pipeline import run_detection_pipeline
-from khutbah_pipeline.edit.smartcut import smart_cut
+from khutbah_pipeline.edit.smartcut import smart_cut, compute_source_av_offset
 from khutbah_pipeline.edit.thumbnail import extract_candidates
 
 
@@ -93,11 +93,32 @@ def run_full(
     result["overall_confidence"] = overall
     result["needs_review"] = overall < auto_pilot_threshold
 
+    # Compute one A/V offset for the whole source. Same recording = same
+    # encoder pipeline = same offset throughout — running per-cut probes
+    # gave Part 1 and Part 2 different offsets on real sources because
+    # SyncNet's per-window confidence varies, and that variance bled into
+    # the cuts as different sync corrections.
+    if audio_offset_ms is None:
+        ranges: list[tuple[float, float]] = []
+        for name in ("part1", "part2"):
+            part = det.get(name)
+            if part:
+                ranges.append((float(part["start"]), float(part["end"])))
+        if ranges:
+            audio_offset_ms = compute_source_av_offset(
+                local_path, ranges, progress_cb=progress_cb,
+            )
+            result["source_av_offset_ms"] = audio_offset_ms
+
     for name in ("part1", "part2"):
         part = det.get(name)
         if not part:
             continue
         dst = os.path.join(output_dir, f"{name}.mp4")
+        # Part 2 cuts start at sit-down silence end — snap to keyframe
+        # at-or-after so the cut lands on the imam's content, not on
+        # tail-end silence from the rollback.
+        start_snap = "after" if name == "part2" else "before"
         cut_t0 = time.time()
         try:
             cut = smart_cut(
@@ -106,6 +127,7 @@ def run_full(
                 normalize_audio=True,
                 target_lufs=target_lufs,
                 audio_offset_ms=audio_offset_ms,
+                start_snap=start_snap,
                 progress_cb=progress_cb,
             )
             size_mb = os.path.getsize(dst) / 1e6 if os.path.exists(dst) else None

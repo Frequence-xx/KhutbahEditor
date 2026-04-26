@@ -27,7 +27,7 @@ from khutbah_pipeline.detect.phrases import (
     find_first_opening_after_long_silence,
     find_first_khutbatul_haaja,
     find_first_khutbatul_haaja_after_long_silence,
-    find_second_opening,
+    find_second_opening_after_long_silence,
     find_last_closing,
     HAAJA_STACK_WINDOW_SECONDS,
     KHUTBATUL_HAAJA_BUFFER,
@@ -185,7 +185,9 @@ def run_pipeline_v2(
 
     # Stage B: find Part 2 start anchor (the SECOND occurrence of the opening
     # phrase — the imam reopens with "ان الحمد لله" after the sit-down).
-    second_opening = find_second_opening(words, after_word_idx=p1_start_word_idx + 5)
+    second_opening = find_second_opening_after_long_silence(
+        words, silences, after_word_idx=p1_start_word_idx + 5,
+    )
     if second_opening is not None:
         p2_start_anchor = second_opening["start_time"] - OPENING_BUFFER
         # Pick the actual sit-down silence: longest silence in [p1_start+min,

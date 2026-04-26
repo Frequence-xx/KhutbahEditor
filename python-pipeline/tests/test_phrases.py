@@ -565,3 +565,80 @@ def test_haaja_after_long_silence_rejects_match_far_from_any_silence():
     # Long silence 200s before haaja — too far
     silences = [{"start": 700.0, "end": 800.0, "duration": 100.0}]
     assert find_first_khutbatul_haaja_after_long_silence(words, silences) is None
+
+
+# --- Silence-gated second-opening (Part 2 sit-down marker) ---------------
+
+from khutbah_pipeline.detect.phrases import find_second_opening_after_long_silence
+
+
+def test_second_opening_after_long_silence_picks_post_sitdown_match():
+    """The imam ends Part 1, sits silently, opens Part 2. The bare second
+    opening matcher can lock onto a transitional utterance (e.g. 'بسم الله'
+    while settling) before the actual Part 2 opening — which puts the cut
+    boundary too early. The right anchor is preceded by the sit-down
+    silence (5+ s)."""
+    words = _ar_words([
+        # Part 1 closing
+        ("بارك", 7195.0, 7195.4),
+        ("الله", 7195.4, 7195.7),
+        # Brief 'الحمد لله' transitional utterance — should be ignored
+        ("الحمد", 7212.0, 7212.4),
+        ("لله", 7212.4, 7212.7),
+        # Sit-down silence: 7213 → 7222 (9 s)
+        # Real Part 2 second opening — preceded by the sit-down silence
+        ("الحمد", 7222.0, 7222.4),
+        ("لله", 7222.4, 7222.7),
+        ("رب", 7222.8, 7223.1),
+        ("العالمين", 7223.2, 7223.7),
+    ])
+    silences = [{"start": 7213.0, "end": 7222.0, "duration": 9.0}]
+    match = find_second_opening_after_long_silence(words, silences, after_word_idx=2)
+    assert match is not None
+    assert match["start_time"] >= 7222.0
+
+
+def test_second_opening_after_long_silence_rejects_match_with_no_silence_before():
+    """If no qualifying silence precedes the candidate, reject."""
+    words = _ar_words([
+        ("الحمد", 7210.0, 7210.4),
+        ("لله", 7210.4, 7210.7),
+        ("رب", 7210.8, 7211.1),
+        ("العالمين", 7211.2, 7211.7),
+    ])
+    silences = [{"start": 7200.0, "end": 7202.0, "duration": 2.0}]  # too short
+    assert find_second_opening_after_long_silence(words, silences, after_word_idx=0) is None
+
+
+def test_second_opening_after_long_silence_uses_lower_silence_threshold():
+    """Sit-down silence is shorter than the imam-ready silence (5 s vs 10 s)."""
+    words = _ar_words([
+        ("الحمد", 7222.0, 7222.4),
+        ("لله", 7222.4, 7222.7),
+        ("رب", 7222.8, 7223.1),
+        ("العالمين", 7223.2, 7223.7),
+    ])
+    silences = [{"start": 7213.0, "end": 7221.0, "duration": 8.0}]  # 8 s sit-down
+    match = find_second_opening_after_long_silence(words, silences, after_word_idx=0)
+    assert match is not None  # 8 s ≥ 5 s default
+
+
+def test_second_opening_after_long_silence_respects_after_word_idx():
+    """Must skip Part 1's bare opening (the FIRST opening) and only consider
+    matches after the given index."""
+    words = _ar_words([
+        # Part 1 opening (must be skipped)
+        ("ان", 50.0, 50.3),
+        ("الحمد", 50.4, 50.7),
+        ("لله", 50.8, 51.0),
+        # Sit-down silence: 7213 → 7222
+        # Part 2 opening
+        ("الحمد", 7222.0, 7222.4),
+        ("لله", 7222.4, 7222.7),
+        ("رب", 7222.8, 7223.1),
+        ("العالمين", 7223.2, 7223.7),
+    ])
+    silences = [{"start": 7213.0, "end": 7222.0, "duration": 9.0}]
+    match = find_second_opening_after_long_silence(words, silences, after_word_idx=3)
+    assert match is not None
+    assert match["start_time"] >= 7222.0

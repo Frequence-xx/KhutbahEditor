@@ -39,6 +39,83 @@ from khutbah_pipeline.util.keyframes import (
 SYNCNET_MIN_CONFIDENCE = 1.5
 
 
+def _distribute_probe_starts(
+    ranges: list[tuple[float, float]],
+    n_per_range: int = 3,
+    probe_duration: float = 6.0,
+) -> list[float]:
+    """Distribute probe start times evenly within each (start, end) range.
+
+    Skips ranges too short to fit `probe_duration` plus margins. Margins
+    of `probe_duration/2` at each end keep probes inside the range.
+    """
+    starts: list[float] = []
+    margin = max(4.0, probe_duration / 2)
+    for r_start, r_end in ranges:
+        duration = r_end - r_start
+        if duration < probe_duration + 2 * margin:
+            continue
+        inner = duration - 2 * margin - probe_duration
+        if n_per_range == 1:
+            starts.append(r_start + duration / 2 - probe_duration / 2)
+        else:
+            for i in range(n_per_range):
+                starts.append(r_start + margin + inner * i / max(1, n_per_range - 1))
+    return starts
+
+
+def compute_source_av_offset(
+    src: str,
+    ranges: list[tuple[float, float]],
+    n_probes_per_range: int = 3,
+    probe_duration: float = 6.0,
+    progress_cb: Optional[Callable[[dict[str, Any]], None]] = None,
+) -> int:
+    """Compute one A/V sync offset for the whole source.
+
+    Probes SyncNet across N windows distributed within each speaking
+    range (typically Part 1 + Part 2), pools the results, returns the
+    consensus offset. Same source = same offset (encoder, container,
+    A/V pipeline don't drift mid-recording) — running per-cut
+    auto-detect added needless variance and gave Part 2 a different
+    offset from Part 1 on real sources.
+
+    Returns 0 if SyncNet is unavailable or no consensus emerges.
+    """
+    try:
+        from khutbah_pipeline.util.syncnet_offset import (
+            syncnet_offset, SYNCNET_MODEL_PATH,
+        )
+        import os
+        if not os.path.exists(SYNCNET_MODEL_PATH):
+            return 0
+    except ImportError:
+        return 0
+
+    starts = _distribute_probe_starts(ranges, n_probes_per_range, probe_duration)
+    if not starts:
+        return 0
+
+    samples: list[dict[str, Any]] = []
+    n_total = len(starts)
+    for i, t in enumerate(starts):
+        if progress_cb:
+            progress_cb({
+                "stage": "av_offset",
+                "message": f"Source-wide A/V probe {i+1}/{n_total}...",
+                "progress": (i + 1) / max(1, n_total),
+            })
+        try:
+            r = syncnet_offset(src, probe_start=t, probe_duration=probe_duration)
+        except Exception:
+            continue
+        if r:
+            samples.append(r)
+
+    consensus = _syncnet_consensus(samples)
+    return int(consensus) if consensus is not None else 0
+
+
 def _syncnet_consensus(
     samples: list[dict[str, Any]],
     min_confidence: float = SYNCNET_MIN_CONFIDENCE,
@@ -128,6 +205,7 @@ def smart_cut(
     target_tp: float = -1.0,
     target_lra: float = 11.0,
     audio_offset_ms: Optional[int] = None,
+    start_snap: str = "before",
     progress_cb: Optional[Callable[[dict[str, Any]], None]] = None,
 ) -> dict[str, Any]:
     """Cut [start, end] from src into dst.
@@ -138,6 +216,13 @@ def smart_cut(
       N>0   - shift audio N ms earlier in source-time to compensate
               for "audio leads video by N ms" content drift
 
+    start_snap:
+      "before" - default, keyframe at-or-before `start`. Use for Part 1
+                 cuts where rolling back captures the imam's first frame.
+      "after"  - keyframe at-or-after `start`. Use for Part 2 cuts where
+                 the requested start sits at a sit-down silence end and
+                 rolling back would include silence in the cut.
+
     Returns dict with the offset that was actually applied, the snap
     boundaries, and the audio gain. Useful for the renderer to display
     "applied X ms sync correction".
@@ -145,7 +230,12 @@ def smart_cut(
     keyframes = list_keyframes(src)
     if not keyframes:
         raise RuntimeError(f"no keyframes found in {src}")
-    snap_start = nearest_keyframe_at_or_before(keyframes, start)
+    if start_snap == "after":
+        snap_start = nearest_keyframe_at_or_after(keyframes, start)
+    elif start_snap == "before":
+        snap_start = nearest_keyframe_at_or_before(keyframes, start)
+    else:
+        raise ValueError(f"start_snap must be 'before' or 'after', got {start_snap!r}")
     snap_end = nearest_keyframe_at_or_after(keyframes, end)
     if snap_start is None or snap_end is None or snap_end <= snap_start:
         raise RuntimeError(

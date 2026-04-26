@@ -72,3 +72,44 @@ def test_consensus_min_consensus_overrideable():
     samples = [_s(600, 4.0)]
     assert _syncnet_consensus(samples, min_consensus=1) == 600
     assert _syncnet_consensus(samples, min_consensus=2) is None
+
+
+# --- Source-wide A/V offset distribution ----------------------------------
+
+from khutbah_pipeline.edit.smartcut import _distribute_probe_starts
+
+
+def test_distribute_probe_starts_spreads_evenly_in_one_range():
+    """5 probes of 6 s in [100, 200]: distribute with 4 s margins so probes
+    don't run off the edge."""
+    starts = _distribute_probe_starts([(100.0, 200.0)], n_per_range=5, probe_duration=6.0)
+    assert len(starts) == 5
+    assert all(100.0 + 3.0 <= t <= 200.0 - 3.0 - 6.0 for t in starts), starts
+
+
+def test_distribute_probe_starts_handles_multiple_ranges():
+    """Probes per range, not per source — stays within each range."""
+    starts = _distribute_probe_starts(
+        [(100.0, 200.0), (1000.0, 1100.0)],
+        n_per_range=3, probe_duration=6.0,
+    )
+    assert len(starts) == 6
+    assert all(100.0 <= t <= 200.0 - 6.0 for t in starts[:3]), starts[:3]
+    assert all(1000.0 <= t <= 1100.0 - 6.0 for t in starts[3:]), starts[3:]
+
+
+def test_distribute_probe_starts_skips_too_short_ranges():
+    """A range smaller than 2x probe_duration can't fit margins — skip."""
+    starts = _distribute_probe_starts(
+        [(100.0, 110.0), (1000.0, 1100.0)],
+        n_per_range=3, probe_duration=6.0,
+    )
+    assert len(starts) == 3  # only the second range qualifies
+    assert all(1000.0 <= t for t in starts)
+
+
+def test_distribute_probe_starts_single_probe_centers():
+    starts = _distribute_probe_starts([(100.0, 200.0)], n_per_range=1, probe_duration=6.0)
+    assert len(starts) == 1
+    # single probe sits in the middle
+    assert 145.0 <= starts[0] <= 155.0

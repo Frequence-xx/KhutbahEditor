@@ -432,3 +432,47 @@ def find_first_khutbatul_haaja_after_long_silence(
     if not qualifying:
         return None
     return min(qualifying, key=lambda x: x["start_time"])
+
+
+# Sit-down silence: shorter than the imam-ready silence (the imam settles
+# faster than he steps up to the minbar — usually 5-15 s vs 15-30 s).
+SECOND_OPENING_POST_SILENCE_WINDOW_SECONDS = 8.0
+
+
+def find_second_opening_after_long_silence(
+    words: list[dict[str, Any]],
+    silences: list[dict[str, Any]],
+    after_word_idx: int,
+    min_silence_seconds: float = 5.0,
+    post_silence_window: float = SECOND_OPENING_POST_SILENCE_WINDOW_SECONDS,
+) -> Optional[dict[str, Any]]:
+    """Return the next Part-2 opener AFTER after_word_idx, preceded by
+    the sit-down silence.
+
+    The bare second_opening matcher locks onto the EARLIEST 'الحمد لله...'
+    after Part 1 — but the imam often utters short transitional phrases
+    while settling ('بسم الله', 'الحمد لله' as a quick interjection)
+    BEFORE the actual Part 2 opening. Those false-positives put the cut
+    boundary too early; viewer sees the imam settling, then opening.
+    Same gate idea as Part 1: require a long silence (≥5 s, the sit-down
+    pause) ending shortly before the candidate.
+    """
+    search_at = after_word_idx
+    while True:
+        candidate: Optional[dict[str, Any]] = None
+        for phrase in SECOND_OPENING_AR:
+            m = _find_phrase(words, phrase, start_at=search_at)
+            if m and (candidate is None or m["start_time"] < candidate["start_time"]):
+                candidate = m
+        if candidate is None:
+            return None
+        cand_t = candidate["start_time"]
+        qualifying = any(
+            s["end"] <= cand_t + SILENCE_DETECTOR_LAG_TOLERANCE_SECONDS
+            and s["end"] >= cand_t - post_silence_window
+            and s["duration"] >= min_silence_seconds
+            for s in silences
+        )
+        if qualifying:
+            return candidate
+        search_at = candidate["end_word_idx"] + 1

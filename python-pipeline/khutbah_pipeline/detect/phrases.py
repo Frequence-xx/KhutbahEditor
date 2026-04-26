@@ -244,3 +244,44 @@ def find_second_opening(
         if m:
             return m
     return None
+
+
+HAAJA_STACK_WINDOW_SECONDS = 30.0
+
+
+def find_part1_anchors(
+    words: list[dict[str, Any]],
+) -> dict[str, Optional[dict[str, Any]]]:
+    """Return both Part-1 anchors that match — opening AND/OR haaja.
+
+    The bare "إن الحمد لله" and the khutbatul-haaja verses appear together
+    at the start of every khutbah (haaja sits 5-20 s after the bare opening).
+    When BOTH match within HAAJA_STACK_WINDOW_SECONDS of each other, the
+    pipeline can stack their confidences as two independent ASR
+    confirmations of Part 1 start. When only one matches, that's the
+    sole anchor (haaja's downstream confidence stays capped — see
+    pipeline_v2 caller for the cap rationale).
+
+    Returns {"opening": <match or None>, "haaja": <match or None>}.
+    """
+    opening = find_first_opening(words)
+
+    if opening is not None:
+        # Haaja by definition comes AFTER the opening — start the search past
+        # the opening's last word so the fuzzy matcher can't lock onto a
+        # window that overlaps the opening itself (the trailing "لله" from
+        # "إن الحمد لله" matches the haaja prefix and trips the early-exit
+        # at ratio >= 0.85).
+        haaja = find_first_khutbatul_haaja(
+            words,
+            threshold=0.5,
+            start_at=opening["end_word_idx"] + 1,
+        )
+        if haaja is not None:
+            time_gap = haaja["start_time"] - opening["end_time"]
+            if time_gap > HAAJA_STACK_WINDOW_SECONDS:
+                haaja = None
+        return {"opening": opening, "haaja": haaja}
+
+    haaja = find_first_khutbatul_haaja(words, threshold=0.5)
+    return {"opening": None, "haaja": haaja}

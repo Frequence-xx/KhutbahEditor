@@ -28,6 +28,7 @@ from khutbah_pipeline.detect.phrases import (
     find_first_adhan_end,
     find_first_khutbatul_haaja,
     find_second_opening,
+    HAAJA_STACK_WINDOW_SECONDS,
     KHUTBATUL_HAAJA_BUFFER,
 )
 from khutbah_pipeline.detect.confidence import anchor_confidence, combine_confidences
@@ -103,14 +104,40 @@ def run_pipeline_v2(
     if opening is not None:
         p1_start_word_idx = opening["end_word_idx"]
         p1_start = max(0.0, opening["start_time"] - OPENING_BUFFER)
-        n = max(1, opening["end_word_idx"] - opening["start_word_idx"] + 1)
-        p1_conf = sum(
-            w["probability"]
-            for w in words[opening["start_word_idx"]:opening["end_word_idx"] + 1]
-        ) / n
-        transcript_p1 = " ".join(
-            w["word"] for w in words[opening["start_word_idx"]:opening["end_word_idx"] + 1]
+        # Stack haaja evidence if it fires within HAAJA_STACK_WINDOW after
+        # the opening. The bare opening's word probabilities are often low
+        # because the imam starts quietly, but the haaja verses 5-15 s
+        # later are louder and transcribe more confidently — combining the
+        # two pulls Part 1 confidence above the auto-pilot threshold for
+        # sources where ASR was uncertain about the opening alone.
+        haaja_after_opening = find_first_khutbatul_haaja(
+            words,
+            threshold=0.5,
+            start_at=opening["end_word_idx"] + 1,
         )
+        if haaja_after_opening is not None:
+            time_gap = haaja_after_opening["start_time"] - opening["end_time"]
+            if time_gap > HAAJA_STACK_WINDOW_SECONDS or time_gap < 0:
+                haaja_after_opening = None
+
+        if haaja_after_opening is not None:
+            anchor_kind = "opening+haaja"
+            p1_conf = combine_confidences(
+                anchor_confidence(words, opening),
+                anchor_confidence(words, haaja_after_opening),
+            )
+            transcript_p1 = " ".join(
+                w["word"]
+                for w in words[
+                    opening["start_word_idx"]:haaja_after_opening["end_word_idx"] + 1
+                ]
+            )
+        else:
+            p1_conf = anchor_confidence(words, opening) or 0.0
+            transcript_p1 = " ".join(
+                w["word"]
+                for w in words[opening["start_word_idx"]:opening["end_word_idx"] + 1]
+            )
     else:
         # Fall back to khutbatul-haaja: the three Quranic verses recited
         # straight after the bare opening. ASR misses the bare "ان الحمد لله"

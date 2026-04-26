@@ -216,3 +216,82 @@ def test_find_second_opening_returns_none_when_absent():
         ("more", 200.0, 200.5),
     ])
     assert find_second_opening(words, after_word_idx=0) is None
+
+
+# --- Part 1 evidence stacking ----------------------------------------------
+
+from khutbah_pipeline.detect.phrases import find_part1_anchors
+
+
+def test_part1_anchors_returns_opening_alone_when_haaja_too_far():
+    """If haaja matches but is far from the opening, treat them as
+    unrelated — only the opening anchors Part 1."""
+    words = _ar_words([
+        ("إن", 100.0, 100.3),
+        ("الحمد", 100.4, 100.7),
+        ("لله", 100.8, 101.0),
+        # 200s gap (way past the 30s window)
+        ("اتقوا", 300.0, 300.3),
+        ("الله", 300.4, 300.7),
+        ("حق", 300.8, 301.0),
+        ("تقاته", 301.1, 301.5),
+        ("ولا", 301.6, 301.8),
+        ("تموتن", 301.9, 302.2),
+        ("الا", 302.3, 302.5),
+        ("وانتم", 302.6, 302.9),
+        ("مسلمون", 303.0, 303.5),
+    ])
+    anchors = find_part1_anchors(words)
+    assert anchors["opening"] is not None
+    assert anchors["haaja"] is None  # Out of window — not stacked
+
+
+def test_part1_anchors_stacks_opening_and_haaja_when_close():
+    """When opening AND haaja both match within 30s of each other, stack
+    them — that's two independent confirmations of Part 1 start."""
+    words = _ar_words([
+        ("إن", 100.0, 100.3),
+        ("الحمد", 100.4, 100.7),
+        ("لله", 100.8, 101.0),
+        # 5s later — well within window
+        ("اتقوا", 106.0, 106.3),
+        ("الله", 106.4, 106.7),
+        ("حق", 106.8, 107.0),
+        ("تقاته", 107.1, 107.5),
+        ("ولا", 107.6, 107.8),
+        ("تموتن", 107.9, 108.2),
+        ("الا", 108.3, 108.5),
+        ("وانتم", 108.6, 108.9),
+        ("مسلمون", 109.0, 109.5),
+    ])
+    anchors = find_part1_anchors(words)
+    assert anchors["opening"] is not None
+    assert anchors["haaja"] is not None
+
+
+def test_part1_anchors_returns_haaja_only_when_opening_missing():
+    """When the bare opening isn't transcribed (low-volume start), the
+    haaja anchor is still found and used as fallback."""
+    words = _ar_words([
+        ("filler", 50.0, 50.3),
+        # No opening — straight to haaja
+        ("اتقوا", 106.0, 106.3),
+        ("الله", 106.4, 106.7),
+        ("حق", 106.8, 107.0),
+        ("تقاته", 107.1, 107.5),
+        ("ولا", 107.6, 107.8),
+        ("تموتن", 107.9, 108.2),
+        ("الا", 108.3, 108.5),
+        ("وانتم", 108.6, 108.9),
+        ("مسلمون", 109.0, 109.5),
+    ])
+    anchors = find_part1_anchors(words)
+    assert anchors["opening"] is None
+    assert anchors["haaja"] is not None
+
+
+def test_part1_anchors_returns_none_when_neither_matches():
+    words = _ar_words([("filler", 50.0, 50.3), ("more", 100.0, 100.5)])
+    anchors = find_part1_anchors(words)
+    assert anchors["opening"] is None
+    assert anchors["haaja"] is None

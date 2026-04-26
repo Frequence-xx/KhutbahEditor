@@ -38,6 +38,7 @@ def transcribe_windows(
     model_dir: str,
     windows: list[dict[str, Any]],
     device: str = "auto",
+    language: Optional[str] = None,
     progress_cb: Optional[Callable[[dict[str, Any]], None]] = None,
 ) -> dict[str, dict[str, Any]]:
     """Run whisper-tiny on each window. Returns {window_id: {words, language}}.
@@ -69,8 +70,14 @@ def transcribe_windows(
             segments, info = model.transcribe(
                 wav,
                 word_timestamps=True,
-                vad_filter=False,
+                # vad_filter skips silent regions inside whisper's own pass —
+                # without this we burned ~130s decoding silent pre-roll on a
+                # 34min source. silero may miss Quran recitation but the
+                # khutbah body has clear conversational speech which it
+                # handles fine.
+                vad_filter=True,
                 beam_size=1,
+                language=language,
             )
             words: list[dict[str, Any]] = []
             for seg in segments:

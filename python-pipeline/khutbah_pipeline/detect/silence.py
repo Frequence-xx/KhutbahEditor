@@ -16,6 +16,8 @@ def detect_silences(
     """
     cmd = [
         FFMPEG, "-hide_banner", "-i", audio_path,
+        "-vn",                        # skip video decode entirely
+        "-ac", "1", "-ar", "16000",   # downsample mono 16k — silencedetect doesn't need more
         "-af", f"silencedetect=noise={noise_db}dB:duration={min_duration}",
         "-f", "null", "-",
     ]

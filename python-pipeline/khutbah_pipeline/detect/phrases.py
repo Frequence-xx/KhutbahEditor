@@ -6,6 +6,35 @@ from khutbah_pipeline.detect.normalize_arabic import normalize_arabic
 # Stored already-normalized (no diacritics, unified alef).
 OPENING_AR: list[str] = ["ان الحمد لله"]
 
+
+# Khutbatul-haaja: three Quranic verses recited straight after "إن الحمد لله".
+# Universal markers for "khateeb just opened the khutbah" — used as a fallback
+# anchor when whisper missed the bare opening (often the case with low-volume
+# pre-roll where ASR misses the first few seconds). The actual "إن الحمد لله"
+# sits 5-15s BEFORE these verses fire, so we subtract a buffer when using
+# these as the Part 1 start anchor. Distinctive fragments — pre-normalized.
+# Khutbah introduction phrases — these come together right after "إن الحمد لله"
+# and are far more reliably transcribed than the bare opening (which whisper
+# often misses on low-volume starts). All listed in PRE-NORMALIZED form
+# (no diacritics, unified alef). Matched FUZZILY (≥50% similarity) since
+# whisper introduces small transcription errors on these long verses.
+KHUTBATUL_HAAJA_AR: list[str] = [
+    # Khutbatul-haaja's three Quranic verses — use longer fragments so
+    # fuzzy matching has enough signal to lock on.
+    "اتقوا الله حق تقاته ولا تموتن الا وانتم مسلمون",
+    "اتقوا ربكم الذي خلقكم من نفس واحده",
+    "اتقوا الله وقولوا قولا سديدا",
+    # Standard "amma ba'd" transition + the hadith that follows. Whisper
+    # transcribes this segment more reliably than the verses themselves
+    # because it's plain prose, not stylized recitation.
+    "اما بعد فان اصدق الحديث كتاب الله",
+    "اصدق الحديث كتاب الله وخير الهدي هدي محمد",
+    # Final hadith of the standard intro. Distinctive due to the unique
+    # combination of "بدعه" + "ضلاله" + "النار".
+    "كل بدعه ضلاله وكل ضلاله في النار",
+]
+KHUTBATUL_HAAJA_BUFFER = 18.0  # seconds to rewind from haaja match to opening
+
 # Adhan-end fallback for when OPENING_AR is missing (rare — happens when the
 # khateeb skips the standard opening). The adhan immediately precedes the
 # khutbah, so its ending phrase is a reliable anchor for Part 1 start.
@@ -75,6 +104,70 @@ def find_first_opening(words: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
         if m:
             return m
     return None
+
+
+def _fuzzy_find_phrase(
+    words: list[dict[str, Any]],
+    phrase: str,
+    threshold: float = 0.5,
+    start_at: int = 0,
+) -> Optional[dict[str, Any]]:
+    """Find the EARLIEST sliding window of words whose normalized text
+    has SequenceMatcher ratio >= threshold against the normalized phrase.
+
+    Used for whisper-transcribed text that has small misspellings / merged
+    or split tokens but is largely correct. Threshold 0.5 catches cases
+    where ~half the characters match — empirically robust for Arabic
+    recitation transcribed by whisper-base.
+    """
+    from difflib import SequenceMatcher
+    norm_phrase = _normalize(phrase)
+    n_words = max(1, len(norm_phrase.split()))
+    best: Optional[dict[str, Any]] = None
+    best_ratio = 0.0
+    for i in range(start_at, len(words) - n_words + 1):
+        candidate = _join_words(words, i, n_words)
+        ratio = SequenceMatcher(None, norm_phrase, candidate).ratio()
+        if ratio >= threshold and ratio > best_ratio:
+            best_ratio = ratio
+            best = {
+                "start_word_idx": i,
+                "end_word_idx": i + n_words - 1,
+                "start_time": words[i]["start"],
+                "end_time": words[i + n_words - 1]["end"],
+                "matched_phrase": phrase,
+                "similarity": ratio,
+            }
+            # If ratio is very high, accept immediately — no need to keep scanning
+            if ratio >= 0.85:
+                return best
+    return best
+
+
+def find_first_khutbatul_haaja(
+    words: list[dict[str, Any]],
+    threshold: float = 0.5,
+    start_at: int = 0,
+) -> Optional[dict[str, Any]]:
+    """Return the EARLIEST khutbatul-haaja / khutbah-intro match.
+
+    Tries each phrase in KHUTBATUL_HAAJA_AR with FUZZY matching at the
+    given threshold (default 0.5). The phrases come together at the start
+    of every khutbah, so any single match is sufficient to anchor Part 1.
+    Returns the match with the EARLIEST start_time across all phrases —
+    the earliest hit anchors closer to the actual opening.
+
+    Caller should subtract KHUTBATUL_HAAJA_BUFFER from start_time to get
+    the Part 1 start (these phrases come 5-20s after the bare opening).
+    """
+    candidates: list[dict[str, Any]] = []
+    for phrase in KHUTBATUL_HAAJA_AR:
+        m = _fuzzy_find_phrase(words, phrase, threshold=threshold, start_at=start_at)
+        if m:
+            candidates.append(m)
+    if not candidates:
+        return None
+    return min(candidates, key=lambda x: x["start_time"])
 
 
 def find_first_adhan_end(

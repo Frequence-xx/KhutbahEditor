@@ -64,21 +64,30 @@ def _distribute_probe_starts(
     return starts
 
 
+PERCEPTUAL_OFFSET_BIAS_MS = 50  # added on top of SyncNet's algorithmic peak
+
+
 def compute_source_av_offset(
     src: str,
     ranges: list[tuple[float, float]],
     n_probes_per_range: int = 3,
     probe_duration: float = 6.0,
+    perceptual_bias_ms: int = PERCEPTUAL_OFFSET_BIAS_MS,
     progress_cb: Optional[Callable[[dict[str, Any]], None]] = None,
 ) -> int:
     """Compute one A/V sync offset for the whole source.
 
     Probes SyncNet across N windows distributed within each speaking
     range (typically Part 1 + Part 2), pools the results, returns the
-    consensus offset. Same source = same offset (encoder, container,
-    A/V pipeline don't drift mid-recording) — running per-cut
-    auto-detect added needless variance and gave Part 2 a different
-    offset from Part 1 on real sources.
+    consensus offset PLUS a perceptual bias. Same source = same offset
+    (encoder, container, A/V pipeline don't drift mid-recording) —
+    running per-cut auto-detect added needless variance and gave Part 2
+    a different offset from Part 1 on real sources.
+
+    perceptual_bias_ms (default 50): SyncNet returns the cross-correlation
+    maximum, but human perception of "in sync" sits ~50-100 ms beyond
+    that on khutbah recordings (audio-leads-video tightening). The bias
+    closes that gap; pass 0 for the raw algorithmic value.
 
     Returns 0 if SyncNet is unavailable or no consensus emerges.
     """
@@ -113,7 +122,9 @@ def compute_source_av_offset(
             samples.append(r)
 
     consensus = _syncnet_consensus(samples)
-    return int(consensus) if consensus is not None else 0
+    if consensus is None:
+        return 0
+    return int(consensus) + int(perceptual_bias_ms)
 
 
 def _syncnet_consensus(

@@ -113,3 +113,15 @@ def test_distribute_probe_starts_single_probe_centers():
     assert len(starts) == 1
     # single probe sits in the middle
     assert 145.0 <= starts[0] <= 155.0
+
+
+# --- perceptual bias on top of consensus ----------------------------------
+
+from khutbah_pipeline.edit.smartcut import PERCEPTUAL_OFFSET_BIAS_MS
+
+
+def test_perceptual_offset_bias_default_is_50_ms():
+    """User-validated default: SyncNet's algorithmic peak feels ~50-100 ms
+    too loose; +50 ms biases toward perceptual sync. Bumping this default
+    is a calibration change — keep the constant explicit so callers can see it."""
+    assert PERCEPTUAL_OFFSET_BIAS_MS == 50

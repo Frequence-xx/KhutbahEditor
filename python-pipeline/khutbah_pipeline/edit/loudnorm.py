@@ -41,13 +41,27 @@ def build_loudnorm_filter(
     target_tp: float = -1.0,
     target_lra: float = 11.0,
 ) -> str:
-    """Pass 2: build the filter string with measured values + targets."""
-    return (
-        f"loudnorm=I={target_i}:TP={target_tp}:LRA={target_lra}"
-        f":measured_I={measured['input_i']}"
-        f":measured_TP={measured['input_tp']}"
-        f":measured_LRA={measured['input_lra']}"
-        f":measured_thresh={measured['input_thresh']}"
-        f":offset={measured['target_offset']}"
-        f":linear=true:print_format=summary"
-    )
+    """Build a low-latency loudness-correction filter chain.
+
+    We DO NOT use the `loudnorm` filter for the apply pass — it has a
+    multi-second internal buffer that introduces ~400-600ms of audio
+    drift versus stream-copied video, observed in the field. Instead:
+
+      1. volume=<gain>dB  — static gain to bring measured_I to target_I.
+                            Sample-accurate, zero buffer.
+      2. alimiter=limit=  — peak limiter to keep dBTP under target.
+                            ~5 ms lookahead, negligible for sync.
+
+    The trade-off vs proper EBU R128: no LRA shaping, no per-section
+    dynamic adjustment. For khutbah audio (mostly single-speaker, fairly
+    consistent dynamics) the static gain + limiter produces output
+    indistinguishable from loudnorm at YouTube-delivery quality.
+    `target_lra` is accepted for API stability and silently ignored.
+    """
+    _ = target_lra  # noqa: F841 — see docstring
+    measured_i = float(measured["input_i"])
+    gain_db = target_i - measured_i
+    # alimiter limit is in linear units (0..1). Convert from dB.
+    # 10**(target_tp/20) — target_tp is negative dB, so limit < 1.0.
+    limit = 10 ** (target_tp / 20.0)
+    return f"volume={gain_db:.3f}dB,alimiter=limit={limit:.4f}:level=disabled"

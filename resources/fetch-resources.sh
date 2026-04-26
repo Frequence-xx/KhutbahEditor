@@ -98,3 +98,24 @@ if [ -d "$MODEL_PATH" ]; then
   echo "    Model dir size:"
   du -sh "$MODEL_PATH" 2>/dev/null || true
 fi
+
+# --- SyncNet A/V offset detector (Oxford VGG, ~53 MB) ---
+# Used for automatic lipsync correction in smart-cut. Beat human ear-tuning
+# in real-world tests: detects sub-frame offset in 5s on CPU. See
+# python-pipeline/khutbah_pipeline/util/syncnet_offset.py.
+SYNCNET_PATH="$MODELS_DIR/syncnet_v2.model"
+if [ ! -f "$SYNCNET_PATH" ]; then
+  echo "==> Downloading SyncNet model (~53 MB)..."
+  curl -L -o "$SYNCNET_PATH" \
+    http://www.robots.ox.ac.uk/~vgg/software/lipsync/data/syncnet_v2.model
+fi
+
+# --- MediaPipe FaceLandmarker (~3.6 MB) ---
+# Provides face crops + lip landmarks for SyncNet's input pipeline (and for
+# the lip-aperture fallback detector in lipsync.py).
+FACE_PATH="$MODELS_DIR/face_landmarker.task"
+if [ ! -f "$FACE_PATH" ]; then
+  echo "==> Downloading FaceLandmarker (~3.6 MB)..."
+  curl -L -o "$FACE_PATH" \
+    https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task
+fi

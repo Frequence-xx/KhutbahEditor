@@ -42,11 +42,12 @@ def _resolve_device(prefer: str = "auto") -> tuple[str, str]:
                 "Set Settings → Compute Device to CPU if your machine has no GPU."
             )
         if not cublas_ok:
+            from khutbah_pipeline.util.gpu import CT2_REQUIRED_CUBLAS_MAJOR
             raise CudaUnavailableError(
-                "CUDA requested but cuBLAS runtime libraries are not loadable on this machine. "
-                "Install the CUDA toolkit (Linux: 'apt install nvidia-cuda-toolkit'; "
-                "Windows: official CUDA installer at developer.nvidia.com/cuda-downloads), "
-                "or change Settings → Compute Device to CPU."
+                f"CUDA requested but libcublas.so.{CT2_REQUIRED_CUBLAS_MAJOR} is not loadable. "
+                f"ctranslate2 4.x links against CUDA {CT2_REQUIRED_CUBLAS_MAJOR} — install the matching pip packages: "
+                f"'pip install nvidia-cublas-cu{CT2_REQUIRED_CUBLAS_MAJOR} nvidia-cudnn-cu{CT2_REQUIRED_CUBLAS_MAJOR}' "
+                "(or the system CUDA toolkit), or change Settings → Compute Device to CPU."
             )
 
     if prefer == "auto":
@@ -57,11 +58,12 @@ def _resolve_device(prefer: str = "auto") -> tuple[str, str]:
                     return ("cpu", c)
             return ("cpu", "float32")
         if not cublas_ok:
+            from khutbah_pipeline.util.gpu import CT2_REQUIRED_CUBLAS_MAJOR
             raise CudaUnavailableError(
-                "An NVIDIA GPU is present, but the CUDA runtime (cuBLAS) cannot be loaded. "
-                "Either install the CUDA toolkit so GPU acceleration works, "
-                "or change Settings → Compute Device to CPU to acknowledge CPU-only mode. "
-                "Auto mode refuses to silently fall back when a GPU is detected."
+                f"An NVIDIA GPU is present, but libcublas.so.{CT2_REQUIRED_CUBLAS_MAJOR} (the version "
+                f"ctranslate2 4.x links against) is not loadable. Install the matching pip packages: "
+                f"'pip install nvidia-cublas-cu{CT2_REQUIRED_CUBLAS_MAJOR} nvidia-cudnn-cu{CT2_REQUIRED_CUBLAS_MAJOR}', "
+                "or change Settings → Compute Device to CPU. Auto mode refuses to silently fall back."
             )
 
     cuda_types = set(ctranslate2.get_supported_compute_types("cuda"))

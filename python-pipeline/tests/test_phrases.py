@@ -365,3 +365,90 @@ def test_find_closing_subhanaka_with_allah_not_allahumma():
     match = find_last_closing(words, dominant_lang="ar")
     assert match is not None
     assert match["end_time"] >= 101.2
+
+
+# --- Silence-gated opening matcher ----------------------------------------
+
+from khutbah_pipeline.detect.phrases import find_first_opening_after_long_silence
+
+
+def test_opening_after_long_silence_accepts_match_after_long_silence():
+    """The right opening — preceded by a 16s silence (imam stepping up
+    to the minbar). Must accept."""
+    words = _ar_words([
+        ("filler", 100.0, 100.5),
+        ("ان", 1050.0, 1050.3),
+        ("الحمد", 1050.4, 1050.7),
+        ("لله", 1050.8, 1051.0),
+    ])
+    silences = [
+        {"start": 1033.0, "end": 1049.0, "duration": 16.0},
+    ]
+    match = find_first_opening_after_long_silence(words, silences)
+    assert match is not None
+    assert match["start_time"] == 1050.0
+
+
+def test_opening_after_long_silence_rejects_false_positive_in_adhan_tail():
+    """The Iziyi false-positive: 'بأن الحمد لله' at 1024s was preceded
+    only by a 3.18s silence (continuous adhan content). Must reject and
+    keep searching."""
+    words = _ar_words([
+        ("بأن", 1024.5, 1024.8),
+        ("الحمد", 1024.9, 1025.2),
+        ("لله", 1025.3, 1025.6),
+        # The real opening 25s later, after a long silence
+        ("ان", 1050.0, 1050.3),
+        ("الحمد", 1050.4, 1050.7),
+        ("لله", 1050.8, 1051.0),
+    ])
+    silences = [
+        {"start": 1018.9, "end": 1022.1, "duration": 3.2},   # too short
+        {"start": 1033.8, "end": 1049.9, "duration": 16.1},  # the imam-ready silence
+    ]
+    match = find_first_opening_after_long_silence(words, silences)
+    assert match is not None
+    assert match["start_time"] == 1050.0, (
+        "must skip the adhan-tail false-positive and pick the post-silence opening"
+    )
+
+
+def test_opening_after_long_silence_returns_none_when_no_match_qualifies():
+    """No opening preceded by a long silence → None (caller falls back to
+    haaja)."""
+    words = _ar_words([
+        ("ان", 100.0, 100.3),
+        ("الحمد", 100.4, 100.7),
+        ("لله", 100.8, 101.0),
+    ])
+    silences = [{"start": 95.0, "end": 99.0, "duration": 4.0}]  # too short
+    assert find_first_opening_after_long_silence(words, silences) is None
+
+
+def test_opening_after_long_silence_silence_must_end_close_to_match():
+    """A 30s silence ending 60s BEFORE the candidate doesn't count — that's
+    a separate event (e.g., between adhan segments), not the imam-ready
+    silence right before the opening."""
+    words = _ar_words([
+        ("ان", 1100.0, 1100.3),
+        ("الحمد", 1100.4, 1100.7),
+        ("لله", 1100.8, 1101.0),
+    ])
+    silences = [{"start": 1010.0, "end": 1040.0, "duration": 30.0}]  # 60s before
+    assert find_first_opening_after_long_silence(words, silences) is None
+
+
+def test_opening_after_long_silence_min_silence_overrideable():
+    """Caller can dial the silence-gate threshold."""
+    words = _ar_words([
+        ("ان", 100.0, 100.3),
+        ("الحمد", 100.4, 100.7),
+        ("لله", 100.8, 101.0),
+    ])
+    silences = [{"start": 90.0, "end": 99.0, "duration": 9.0}]
+    # Default min=10 → rejected
+    assert find_first_opening_after_long_silence(words, silences) is None
+    # Lower bar → accepted
+    assert find_first_opening_after_long_silence(
+        words, silences, min_silence_seconds=5.0
+    ) is not None

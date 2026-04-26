@@ -24,7 +24,7 @@ from typing import Any, Callable, Optional
 from khutbah_pipeline.detect.silence import detect_silences
 from khutbah_pipeline.detect.window_transcribe import transcribe_windows
 from khutbah_pipeline.detect.phrases import (
-    find_first_opening,
+    find_first_opening_after_long_silence,
     find_first_adhan_end,
     find_first_khutbatul_haaja,
     find_second_opening,
@@ -100,8 +100,12 @@ def run_pipeline_v2(
     })
 
     # Stage A: find Part 1 start anchor.
-    # Try the canonical opening "ان الحمد لله" first.
-    opening = find_first_opening(words)
+    # Use the silence-gated opening matcher so we only accept the bare
+    # opening when it's preceded by a long silence (>=10 s) — that's
+    # the imam-stepping-up-to-the-minbar moment. Without this gate the
+    # matcher false-positives on adhan-tail content where 'الحمد لله'
+    # appears as a substring of 'بسم الله الحمد لله...' inside the call.
+    opening = find_first_opening_after_long_silence(words, silences)
     anchor_kind = "opening"
     if opening is not None:
         p1_start_word_idx = opening["end_word_idx"]

@@ -297,3 +297,53 @@ def find_part1_anchors(
 
     haaja = find_first_khutbatul_haaja(words, threshold=0.5)
     return {"opening": None, "haaja": haaja}
+
+
+# Maximum gap between the silence's end and the candidate opening's start.
+# Imam typically begins speaking within a few seconds of stepping up — if the
+# candidate is way later than the long silence, that silence wasn't the
+# imam-ready moment.
+OPENING_POST_SILENCE_WINDOW_SECONDS = 5.0
+
+
+def find_first_opening_after_long_silence(
+    words: list[dict[str, Any]],
+    silences: list[dict[str, Any]],
+    min_silence_seconds: float = 10.0,
+    post_silence_window: float = OPENING_POST_SILENCE_WINDOW_SECONDS,
+) -> Optional[dict[str, Any]]:
+    """Return the first OPENING_AR match preceded by a long silence.
+
+    The adhan ends → ~20 s silence (imam stepping up to the minbar) →
+    imam opens with "إن الحمد لله". The bare 'opening matched anywhere'
+    finder false-positives on adhan-tail content like "...بسم الله...
+    الحمد لله..." (substring containment after Arabic normalisation
+    triggers on these too). Gating on a >=10 s silence ending shortly
+    before the candidate kills those false positives — it's a structural
+    signal the matcher can't fake.
+
+    Iterates opening matches in order; for each, checks for a qualifying
+    silence ending within `post_silence_window` seconds before the
+    match's start_time. Returns the EARLIEST accepted match.
+    """
+    search_at = 0
+    while True:
+        candidate: Optional[dict[str, Any]] = None
+        for phrase in OPENING_AR:
+            m = _find_phrase(words, phrase, start_at=search_at)
+            if m and (candidate is None or m["start_time"] < candidate["start_time"]):
+                candidate = m
+        if candidate is None:
+            return None
+        # Did a qualifying silence end shortly before this candidate?
+        cand_t = candidate["start_time"]
+        qualifying = [
+            s for s in silences
+            if s["end"] <= cand_t
+            and s["end"] >= cand_t - post_silence_window
+            and s["duration"] >= min_silence_seconds
+        ]
+        if qualifying:
+            return candidate
+        # Reject and search past this match
+        search_at = candidate["end_word_idx"] + 1

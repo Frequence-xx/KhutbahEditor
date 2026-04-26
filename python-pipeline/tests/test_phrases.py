@@ -452,3 +452,116 @@ def test_opening_after_long_silence_min_silence_overrideable():
     assert find_first_opening_after_long_silence(
         words, silences, min_silence_seconds=5.0
     ) is not None
+
+
+def test_opening_after_long_silence_tolerates_silencedetect_lag():
+    """ffmpeg silencedetect can flag the silence as ending slightly AFTER
+    the imam's actual word-start (whisper word_timestamps are tighter than
+    energy-based silence detection). Real Iziyi v6yLY17uMQE source: imam
+    starts at 193.92 s, silencedetect says silence ends 194.32 s — a 0.4 s
+    inversion. The gate must tolerate this kind of detector lag."""
+    words = _ar_words([
+        ("ان", 193.92, 194.20),
+        ("الحمد", 194.48, 194.80),
+        ("لله", 194.88, 195.20),
+    ])
+    silences = [{"start": 162.22, "end": 194.32, "duration": 32.10}]
+    match = find_first_opening_after_long_silence(words, silences)
+    assert match is not None, (
+        "silence ending 0.4 s after the candidate word-start is the same"
+        " event — silencedetect just lagged"
+    )
+
+
+# --- Silence-gated haaja matcher (drops the 600s hard floor) -------------
+
+from khutbah_pipeline.detect.phrases import find_first_khutbatul_haaja_after_long_silence
+
+
+def test_haaja_after_long_silence_accepts_short_preroll_source():
+    """v6y source: imam-ready silence at 2:42-3:14 (32s), haaja first
+    verse at ~3:47. The haaja anchor must lock here, not at 13:00 — the
+    prior MIN_KHUTBAH_OPENING_TIME=600s floor was wrong for short-preroll
+    sources."""
+    words = _ar_words([
+        # Some pre-roll noise
+        ("recitation", 30.0, 31.0),
+        # Imam opens at 194s (whisper mistranscribed, no opening match)
+        ("احمد", 194.41, 194.81),
+        ("الله", 194.81, 195.20),
+        # Haaja at 227s — first verse "اتقوا الله حق تقاته ولا تموتن الا وانتم مسلمون"
+        ("اتقوا", 227.65, 228.07),
+        ("الله", 228.07, 228.43),
+        ("حق", 228.43, 228.93),
+        ("تقاته", 228.93, 229.71),
+        ("ولا", 229.71, 230.00),
+        ("تموتن", 230.00, 230.40),
+        ("الا", 230.40, 230.70),
+        ("وانتم", 230.70, 231.10),
+        ("مسلمون", 231.10, 231.60),
+    ])
+    silences = [
+        {"start": 162.22, "end": 194.32, "duration": 32.10},  # the imam-ready silence
+    ]
+    match = find_first_khutbatul_haaja_after_long_silence(words, silences)
+    assert match is not None
+    assert match["start_time"] >= 227.0
+
+
+def test_haaja_after_long_silence_rejects_false_match_in_recitation():
+    """A haaja-like fuzzy match in pre-roll Quran recitation (no preceding
+    long silence) must be rejected."""
+    words = _ar_words([
+        # Pre-roll Quran recitation has phrases similar to haaja
+        ("اتقوا", 100.0, 100.4),
+        ("الله", 100.4, 100.7),
+        ("حق", 100.8, 101.1),
+        ("تقاته", 101.1, 101.5),
+        ("ولا", 101.5, 101.8),
+        ("تموتن", 101.8, 102.2),
+        ("الا", 102.2, 102.5),
+        ("وانتم", 102.5, 102.9),
+        ("مسلمون", 102.9, 103.3),
+    ])
+    silences = [{"start": 95.0, "end": 99.5, "duration": 4.5}]  # too short
+    assert find_first_khutbatul_haaja_after_long_silence(words, silences) is None
+
+
+def test_haaja_after_long_silence_window_includes_imam_opening_pause():
+    """The haaja sits 5-30s after the bare opening (which is right after
+    the silence end). So the gate must allow up to ~45s between silence
+    end and haaja start."""
+    words = _ar_words([
+        ("اتقوا", 230.0, 230.4),
+        ("الله", 230.4, 230.7),
+        ("حق", 230.8, 231.1),
+        ("تقاته", 231.1, 231.5),
+        ("ولا", 231.5, 231.8),
+        ("تموتن", 231.8, 232.2),
+        ("الا", 232.2, 232.5),
+        ("وانتم", 232.5, 232.9),
+        ("مسلمون", 232.9, 233.3),
+    ])
+    silences = [{"start": 162.22, "end": 194.32, "duration": 32.10}]
+    # haaja_start - silence_end = 230 - 194.32 = 35.68 s — within window
+    match = find_first_khutbatul_haaja_after_long_silence(words, silences)
+    assert match is not None
+
+
+def test_haaja_after_long_silence_rejects_match_far_from_any_silence():
+    """If haaja matches but the nearest prior silence ended >60s before,
+    that's not an imam-ready silence."""
+    words = _ar_words([
+        ("اتقوا", 1000.0, 1000.4),
+        ("الله", 1000.4, 1000.7),
+        ("حق", 1000.8, 1001.1),
+        ("تقاته", 1001.1, 1001.5),
+        ("ولا", 1001.5, 1001.8),
+        ("تموتن", 1001.8, 1002.2),
+        ("الا", 1002.2, 1002.5),
+        ("وانتم", 1002.5, 1002.9),
+        ("مسلمون", 1002.9, 1003.3),
+    ])
+    # Long silence 200s before haaja — too far
+    silences = [{"start": 700.0, "end": 800.0, "duration": 100.0}]
+    assert find_first_khutbatul_haaja_after_long_silence(words, silences) is None

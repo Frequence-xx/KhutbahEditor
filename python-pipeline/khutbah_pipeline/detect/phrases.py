@@ -305,6 +305,14 @@ def find_part1_anchors(
 # imam-ready moment.
 OPENING_POST_SILENCE_WINDOW_SECONDS = 5.0
 
+# Tolerance for ffmpeg silencedetect lag: it's energy-based and can flag
+# the silence as ending up to ~1 s AFTER whisper's word-start (whisper
+# word_timestamps are tighter than energy decay). Without this slack the
+# gate rejects perfectly-aligned silence/opening pairs that happen to have
+# a small inversion. Real example: Iziyi v6yLY17uMQE — imam starts at
+# 193.92 s, silencedetect ends silence at 194.32 s.
+SILENCE_DETECTOR_LAG_TOLERANCE_SECONDS = 2.0
+
 
 def find_first_opening_after_long_silence(
     words: list[dict[str, Any]],
@@ -336,10 +344,13 @@ def find_first_opening_after_long_silence(
         if candidate is None:
             return None
         # Did a qualifying silence end shortly before this candidate?
+        # Tolerate detector lag: silence may "end" up to LAG_TOLERANCE
+        # seconds after the actual word-start due to ffmpeg silencedetect's
+        # energy-decay timing vs whisper word_timestamps.
         cand_t = candidate["start_time"]
         qualifying = [
             s for s in silences
-            if s["end"] <= cand_t
+            if s["end"] <= cand_t + SILENCE_DETECTOR_LAG_TOLERANCE_SECONDS
             and s["end"] >= cand_t - post_silence_window
             and s["duration"] >= min_silence_seconds
         ]
@@ -347,3 +358,77 @@ def find_first_opening_after_long_silence(
             return candidate
         # Reject and search past this match
         search_at = candidate["end_word_idx"] + 1
+
+
+# Window from silence-end to haaja-start: imam opens with bare phrase right
+# after silence (~0-5 s), then haaja follows 5-30 s later. 45 s covers
+# imams who pause / take a breath between sections.
+HAAJA_POST_SILENCE_WINDOW_SECONDS = 45.0
+
+
+def find_first_khutbatul_haaja_after_long_silence(
+    words: list[dict[str, Any]],
+    silences: list[dict[str, Any]],
+    min_silence_seconds: float = 10.0,
+    post_silence_window: float = HAAJA_POST_SILENCE_WINDOW_SECONDS,
+    threshold: float = 0.5,
+) -> Optional[dict[str, Any]]:
+    """Return the earliest khutbatul-haaja match preceded by a long silence.
+
+    Works as a fallback Part-1 anchor when whisper missed the bare opening:
+    haaja-like content can appear inside Quran recitation pre-roll (false
+    positives), so we gate on the same imam-ready silence used for the
+    bare opening — but with a wider post-silence window because haaja
+    sits 5-30 s after the silence end (the imam opens, then recites the
+    haaja verses).
+
+    Replaces the prior MIN_KHUTBAH_OPENING_TIME=600 s hard floor, which
+    broke short-pre-roll sources where the actual khutbah starts in the
+    first 5 minutes (e.g. Shaykh Said Vrijdagpreek v6yLY17uMQE: opens at
+    3:14).
+
+    Collects ALL fuzzy matches per phrase (not just the early-exit first)
+    so a sub-optimal partial overlap doesn't pre-empt the perfect match
+    a few words later.
+    """
+    from difflib import SequenceMatcher
+
+    qualifying: list[dict[str, Any]] = []
+
+    def silence_ok(cand_t: float) -> bool:
+        return any(
+            s["end"] <= cand_t + SILENCE_DETECTOR_LAG_TOLERANCE_SECONDS
+            and s["end"] >= cand_t - post_silence_window
+            and s["duration"] >= min_silence_seconds
+            for s in silences
+        )
+
+    for phrase in KHUTBATUL_HAAJA_AR:
+        norm_phrase = _normalize(phrase)
+        n_words = max(1, len(norm_phrase.split()))
+        best: Optional[dict[str, Any]] = None
+        best_ratio = 0.0
+        for i in range(0, len(words) - n_words + 1):
+            cand_text = _join_words(words, i, n_words)
+            ratio = SequenceMatcher(None, norm_phrase, cand_text).ratio()
+            if ratio < threshold:
+                continue
+            cand_start_time = words[i]["start"]
+            if not silence_ok(cand_start_time):
+                continue
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best = {
+                    "start_word_idx": i,
+                    "end_word_idx": i + n_words - 1,
+                    "start_time": cand_start_time,
+                    "end_time": words[i + n_words - 1]["end"],
+                    "matched_phrase": phrase,
+                    "similarity": ratio,
+                }
+        if best is not None:
+            qualifying.append(best)
+
+    if not qualifying:
+        return None
+    return min(qualifying, key=lambda x: x["start_time"])

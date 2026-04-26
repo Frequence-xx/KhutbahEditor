@@ -25,8 +25,8 @@ from khutbah_pipeline.detect.silence import detect_silences
 from khutbah_pipeline.detect.window_transcribe import transcribe_windows
 from khutbah_pipeline.detect.phrases import (
     find_first_opening_after_long_silence,
-    find_first_adhan_end,
     find_first_khutbatul_haaja,
+    find_first_khutbatul_haaja_after_long_silence,
     find_second_opening,
     find_last_closing,
     HAAJA_STACK_WINDOW_SECONDS,
@@ -146,23 +146,19 @@ def run_pipeline_v2(
             )
     else:
         # Fall back to khutbatul-haaja: the three Quranic verses recited
-        # straight after the bare opening. ASR misses the bare "ان الحمد لله"
-        # often (low-volume start), but the verses are 5-15s later and louder.
-        # Time-gate: real khutbah opening is never in the first 10 min
-        # of a recording — there's always Quran recitation + adhan first.
-        # This avoids the fuzzy matcher locking onto adhan content like
-        # "أشهد ولا إله إلا الله" which has many particles in common with
-        # the haaja verses. We also try the adhan-end gate as a secondary
-        # bound (more accurate when find_first_adhan_end actually fires).
-        MIN_KHUTBAH_OPENING_TIME = 600.0  # 10 min
-        haaja_start_word = next(
-            (i for i, w in enumerate(words) if w["start"] >= MIN_KHUTBAH_OPENING_TIME),
-            0,
+        # straight after the bare opening. Whisper misses the bare opening
+        # often (low-volume start, mistranscriptions like 'أحمد' instead of
+        # 'إن الحمد'), but the verses are 5-30 s later and louder.
+        #
+        # Silence-gate the match the same way the bare opening is gated:
+        # haaja must be preceded by a long silence (the imam-ready
+        # silence) within HAAJA_POST_SILENCE_WINDOW_SECONDS. This kills
+        # haaja-shaped false positives in pre-roll Quran recitation
+        # without imposing a wall-clock floor — short-pre-roll sources
+        # (e.g. v6yLY17uMQE: imam opens at 3:14) anchor correctly.
+        haaja = find_first_khutbatul_haaja_after_long_silence(
+            words, silences, threshold=0.5,
         )
-        adhan = find_first_adhan_end(words, max_position_seconds=1200.0)
-        if adhan is not None:
-            haaja_start_word = max(haaja_start_word, adhan["end_word_idx"] + 1)
-        haaja = find_first_khutbatul_haaja(words, threshold=0.5, start_at=haaja_start_word)
         if haaja is None:
             return {
                 "error": "opening_not_found",

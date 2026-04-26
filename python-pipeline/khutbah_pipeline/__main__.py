@@ -12,6 +12,7 @@ from khutbah_pipeline.edit.mux import apply_offset_and_mux
 from khutbah_pipeline.edit.smartcut import smart_cut
 from khutbah_pipeline.edit.thumbnail import extract_candidates
 from khutbah_pipeline.detect.pipeline import run_detection_pipeline
+from khutbah_pipeline.run_full import run_full
 from khutbah_pipeline.upload.youtube_api import upload_video, set_thumbnail, update_metadata
 from khutbah_pipeline.upload.playlists import (
     list_playlists,
@@ -149,6 +150,43 @@ def _detect(
         device=device,
         progress_cb=(lambda payload: notify(payload)) if notify else None,
     )
+
+
+@register("pipeline.run_full")
+def _run_full(
+    input_path: str,
+    output_dir: str,
+    model_dir: str = "",
+    device: str = "",
+    target_lufs: float = -14.0,
+    audio_offset_ms: Optional[int] = None,
+    thumbnail_count: int = 6,
+    auto_pilot_threshold: float = 0.90,
+    notify: Optional[Callable[[dict[str, Any]], None]] = None,
+) -> dict[str, Any]:
+    """Headless end-to-end: input → detect → cuts → thumbnails.
+
+    Same model_dir / device default resolution as detect.run.
+    """
+    if not model_dir:
+        model_dir = os.environ.get(
+            "KHUTBAH_MODEL_DIR",
+            "../resources/models/whisper-tiny",
+        )
+    if not device:
+        device = os.environ.get("KHUTBAH_COMPUTE_DEVICE", "auto")
+    return run_full(
+        input_path=input_path,
+        output_dir=output_dir,
+        whisper_model_dir=model_dir,
+        device=device,
+        target_lufs=target_lufs,
+        audio_offset_ms=audio_offset_ms,
+        thumbnail_count=thumbnail_count,
+        auto_pilot_threshold=auto_pilot_threshold,
+        progress_cb=(lambda payload: notify(payload)) if notify else None,
+    )
+
 
 @register("upload.video")
 def _upload(

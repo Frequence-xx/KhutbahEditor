@@ -15,8 +15,13 @@ def test_measure_loudness_returns_lufs():
 
 
 def test_filter_string_is_valid():
+    """Post-2026-04 the filter is volume + alimiter (not the loudnorm
+    filter — its 400-600 ms internal buffer drifted audio vs stream-copied
+    video). volume= encodes the static gain that brings measured_I to
+    target_i; alimiter caps peaks at target_tp."""
     measured = measure_loudness(str(FIXTURE))
     f = build_loudnorm_filter(measured, target_i=-14.0, target_tp=-1.0, target_lra=11.0)
-    assert "loudnorm=" in f
-    assert "I=-14" in f
-    assert "linear=true" in f
+    assert f.startswith("volume="), f"expected volume= filter, got {f!r}"
+    assert "alimiter=" in f, f"expected alimiter, got {f!r}"
+    expected_gain = -14.0 - float(measured["input_i"])
+    assert f"volume={expected_gain:.3f}dB" in f

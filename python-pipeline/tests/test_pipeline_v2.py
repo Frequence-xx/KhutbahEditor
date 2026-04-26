@@ -41,9 +41,10 @@ def test_pipeline_v2_progress_callback_invoked() -> None:
     def cb(payload: dict) -> None:
         seen_stages.append(payload.get("stage", ""))
     run_pipeline_v2(str(FIXTURE), str(MODEL_DIR), device="cpu", progress_cb=cb)
-    # Synthetic sine-tone fixture isn't speech-like; pipeline may exit at the
-    # candidate stage with no_part1_candidates. We just verify the early
-    # stages all emitted progress events — the full happy path is exercised
-    # by the real-clip benchmark in scripts/bench_pipeline.py.
-    assert any(s == "vad" for s in seen_stages)
-    assert any(s in ("silence", "shots", "candidates") for s in seen_stages)
+    # Current pipeline_v2 stages (post-VAD-removal, see commit 4be15df):
+    # silence → transcribe → detect_boundaries → done. The synthetic
+    # fixture won't anchor anything (no real speech), but silence and
+    # transcribe always fire before any boundary work. The full happy path
+    # is exercised by scripts/e2e_canonical.py against a real source.
+    assert any(s == "silence" for s in seen_stages)
+    assert any(s == "transcribe" for s in seen_stages)

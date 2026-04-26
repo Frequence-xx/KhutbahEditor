@@ -7,6 +7,17 @@ from khutbah_pipeline.detect.normalize_arabic import normalize_arabic
 OPENING_AR: list[str] = ["ان الحمد لله"]
 
 
+# Part 2 second-opening: imams either repeat the bare opening "إن الحمد لله"
+# OR launch with the fātiḥa-style "الحمد لله رب العالمين" / variants. The
+# canonical Iziyi source uses the second form, so the bare-opening list alone
+# misses Part 2 entirely. Listed in normalized form, longest-first so the
+# more specific phrase preempts a partial match of the shorter one.
+SECOND_OPENING_AR: list[str] = [
+    "الحمد لله رب العالمين",
+    "ان الحمد لله",
+]
+
+
 # Khutbatul-haaja: three Quranic verses recited straight after "إن الحمد لله".
 # Universal markers for "khateeb just opened the khutbah" — used as a fallback
 # anchor when whisper missed the bare opening (often the case with low-volume
@@ -217,3 +228,19 @@ def find_last_closing(
     if not candidates:
         return None
     return max(candidates, key=lambda x: x["end_time"])
+
+
+def find_second_opening(
+    words: list[dict[str, Any]],
+    after_word_idx: int,
+) -> Optional[dict[str, Any]]:
+    """Find the next Part-2 opener AFTER after_word_idx.
+
+    Tries SECOND_OPENING_AR phrases in declaration order (longest-first so
+    'الحمد لله رب العالمين' preempts the substring match of 'ان الحمد لله').
+    """
+    for phrase in SECOND_OPENING_AR:
+        m = _find_phrase(words, phrase, start_at=after_word_idx)
+        if m:
+            return m
+    return None

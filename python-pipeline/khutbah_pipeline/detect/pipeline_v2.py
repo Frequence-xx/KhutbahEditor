@@ -7,8 +7,8 @@ Strategy:
   3. Phrase match: find first OPENING or first KHUTBATUL_HAAJA → Part 1 start
   4. Sit-down: longest silence in [P1_start + 5min, end - 5min]
      bounded by the next "opening" (Part 2 start = repeat of "ان الحمد لله")
-  5. Closing dua: find_last_closing in transcript after Part 2 start
-  6. Part 2 end = closing match end + 1s buffer
+  5. Part 2 end = source duration (closing dua stays in the cut by design;
+     trimming it created low-confidence boundaries when ASR missed the dua)
 
 This replaces the silero+candidate-window approach because silero misclassifies
 Quran recitation as non-speech, and tiny-whisper is too small for Arabic. The
@@ -27,19 +27,16 @@ from khutbah_pipeline.detect.phrases import (
     find_first_opening,
     find_first_adhan_end,
     find_first_khutbatul_haaja,
-    find_last_closing,
+    find_second_opening,
     KHUTBATUL_HAAJA_BUFFER,
-    _find_phrase,
-    OPENING_AR,
 )
 from khutbah_pipeline.detect.confidence import anchor_confidence, combine_confidences
 from khutbah_pipeline.util.ffmpeg import ffprobe_json
 
 
 OPENING_BUFFER = 5.0
-DUA_END_BUFFER = 1.0
 MIN_PART1_DURATION = 300.0   # silences within this window aren't the sitting silence
-END_GUARD_SECONDS = 60.0     # silences in the last 60 s are post-roll, not the dua close
+END_GUARD_SECONDS = 60.0     # silences in the last 60 s are post-roll, not the sit-down
 
 
 def _probe_duration(path: str) -> float:
@@ -50,15 +47,6 @@ def _probe_duration(path: str) -> float:
 def _emit(cb: Optional[Callable[[dict[str, Any]], None]], payload: dict[str, Any]) -> None:
     if cb:
         cb(payload)
-
-
-def _find_second_opening(words: list[dict[str, Any]], after_word_idx: int) -> Optional[dict[str, Any]]:
-    """Find the next 'ان الحمد لله' AFTER after_word_idx — Part 2's opening."""
-    for phrase in OPENING_AR:
-        m = _find_phrase(words, phrase, start_at=after_word_idx)
-        if m:
-            return m
-    return None
 
 
 def run_pipeline_v2(
@@ -169,7 +157,7 @@ def run_pipeline_v2(
 
     # Stage B: find Part 2 start anchor (the SECOND occurrence of the opening
     # phrase — the imam reopens with "ان الحمد لله" after the sit-down).
-    second_opening = _find_second_opening(words, after_word_idx=p1_start_word_idx + 5)
+    second_opening = find_second_opening(words, after_word_idx=p1_start_word_idx + 5)
     if second_opening is not None:
         p2_start_anchor = second_opening["start_time"] - OPENING_BUFFER
         # Pick the actual sit-down silence: longest silence in [p1_start+min,
@@ -187,7 +175,6 @@ def run_pipeline_v2(
             # No silence between — use the second opening as the boundary.
             p1_end = p2_start_anchor - 5.0
             p2_start = p2_start_anchor
-        p2_anchor_word_idx = second_opening["end_word_idx"]
     else:
         # No second opening — fall back to longest silence in the middle.
         valid = [
@@ -205,39 +192,18 @@ def run_pipeline_v2(
         longest = max(valid, key=lambda s: s["duration"])
         p1_end = longest["start"]
         p2_start = longest["end"]
-        # No reliable index for closing search — start from p2_start word
-        p2_anchor_word_idx = next(
-            (i for i, w in enumerate(words) if w["start"] >= p2_start),
-            len(words),
-        )
 
-    _emit(progress_cb, {
-        "stage": "detect_boundaries",
-        "message": f"Sit-down at {p1_end:.0f}s; finding closing dua…",
-        "progress": 0.92,
-    })
+    # Part 2 ends at the source duration. Per product decision (2026-04-26):
+    # the closing dua stays in the cut — no clever trim. This drops the
+    # closing-dua matcher entirely; Part 2 confidence comes from the
+    # second-opening anchor alone.
+    p2_end = duration
+    transcript_p2 = " ".join(
+        w["word"] for w in words[max(0, len(words) - 12):]
+    )
 
-    # Stage C: closing dua anchor
-    closing = find_last_closing(words, dominant_lang="ar", search_from_word=p2_anchor_word_idx)
-    if closing is not None:
-        p2_end = min(duration, closing["end_time"] + DUA_END_BUFFER)
-        transcript_p2 = " ".join(
-            w["word"] for w in words[max(0, len(words) - 12):]
-        )
-    else:
-        confident = [
-            w for w in words[p2_anchor_word_idx:] if w["probability"] > 0.5
-        ]
-        p2_end = (confident[-1]["end"] + 2.0) if confident else duration
-        transcript_p2 = ""
-
-    # Part 2 confidence comes from the two anchor word-probability spans:
-    # the second "ان الحمد لله" opening and the closing dua. Geometric mean
-    # so a single weak anchor visibly drags the score down. low_default=0.3
-    # signals "no anchors at all" so the auto-pilot threshold (0.90) refuses.
     p2_conf = combine_confidences(
         anchor_confidence(words, second_opening),
-        anchor_confidence(words, closing),
     )
 
     overall = combine_confidences(p1_conf, p2_conf)

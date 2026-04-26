@@ -1,9 +1,13 @@
+import pytest
+
 from khutbah_pipeline.detect.phrases import (
     OPENING_AR,
+    SECOND_OPENING_AR,
     CLOSINGS,
     find_first_opening,
     find_first_adhan_end,
     find_last_closing,
+    find_second_opening,
 )
 
 
@@ -76,6 +80,30 @@ def test_find_opening_returns_none_when_absent():
     assert find_first_opening(words) is None
 
 
+# Real ASR variants observed on whisper-tiny / whisper-base output for the
+# canonical opening "إن الحمد لله". The substring matcher must accept these.
+@pytest.mark.parametrize("variant_words", [
+    ["بأن", "الحمد", "لله"],   # canonical Iziyi source: tiny gave bāʾ-prefix
+    ["وإن", "الحمد", "لله"],   # wāw-prefix (conjunction)
+    ["إنّ", "الحمد", "لله"],   # shadda preserved
+    ["فإن", "الحمد", "لله"],   # fāʾ-prefix
+    ["إنَّ", "الْحَمْدَ", "لِلَّهِ"],  # full diacritics
+])
+def test_find_opening_accepts_asr_variants(variant_words):
+    """Whisper introduces small prefix / diacritic variants on the opening
+    phrase. Substring-after-normalisation handles these — lock the behaviour
+    so future matcher changes don't silently regress on real ASR output."""
+    words = _ar_words([
+        ("بسم", 0.5, 0.9),
+        (variant_words[0], 5.0, 5.4),
+        (variant_words[1], 5.5, 6.0),
+        (variant_words[2], 6.1, 6.6),
+    ])
+    match = find_first_opening(words)
+    assert match is not None, f"matcher rejected variant {variant_words!r}"
+    assert match["start_word_idx"] == 1
+
+
 def test_find_closing_in_dutch():
     words = [
         {"word": "onze", "start": 100.0, "end": 100.3, "lang": "nl"},
@@ -133,3 +161,58 @@ def test_find_closing_finds_dutch_closing_when_dominant_is_arabic():
     match = find_last_closing(words, dominant_lang="ar")
     assert match is not None
     assert match["end_time"] == 103.0
+
+
+# --- second-opening (Part 2 start anchor) ----------------------------------
+
+def test_find_second_opening_matches_fatiha_style_open():
+    """Many imams start Part 2 with 'الحمد لله رب العالمين' (fātiḥa-style)
+    rather than repeating the bare 'إن الحمد لله'. The canonical Iziyi
+    source is one of these — this anchor is what makes Part 2 detectable."""
+    words = _ar_words([
+        ("الحمد", 1500.0, 1500.4),
+        ("لله", 1500.5, 1500.8),
+        ("رب", 1500.9, 1501.1),
+        ("العالمين", 1501.2, 1501.7),
+    ])
+    match = find_second_opening(words, after_word_idx=0)
+    assert match is not None
+    assert match["start_word_idx"] == 0
+
+
+def test_find_second_opening_matches_repeat_of_bare_opening():
+    """Imams who do repeat 'إن الحمد لله' must still anchor."""
+    words = _ar_words([
+        ("إن", 1500.0, 1500.3),
+        ("الحمد", 1500.4, 1500.7),
+        ("لله", 1500.8, 1501.0),
+    ])
+    match = find_second_opening(words, after_word_idx=0)
+    assert match is not None
+    assert match["start_word_idx"] == 0
+
+
+def test_find_second_opening_respects_after_word_idx():
+    """Must not match the FIRST opening — only later ones (Part 2 happens
+    after Part 1)."""
+    words = _ar_words([
+        ("إن", 50.0, 50.3),       # Part 1 opening (must be skipped)
+        ("الحمد", 50.4, 50.7),
+        ("لله", 50.8, 51.0),
+        ("filler", 100.0, 100.5),
+        ("الحمد", 1500.0, 1500.4),  # Part 2 fātiḥa-style opening
+        ("لله", 1500.5, 1500.8),
+        ("رب", 1500.9, 1501.1),
+        ("العالمين", 1501.2, 1501.7),
+    ])
+    match = find_second_opening(words, after_word_idx=3)
+    assert match is not None
+    assert match["start_time"] >= 1500.0
+
+
+def test_find_second_opening_returns_none_when_absent():
+    words = _ar_words([
+        ("filler", 100.0, 100.5),
+        ("more", 200.0, 200.5),
+    ])
+    assert find_second_opening(words, after_word_idx=0) is None

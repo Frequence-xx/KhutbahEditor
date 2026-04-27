@@ -3532,15 +3532,28 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 - Create: `src/screens/Shell.tsx`
 - Test: `tests/renderer/Shell.test.tsx`
 
+**Contract notes (corrections vs. earlier draft):**
+- `Bridge` (from Task 6) requires an `auth.accessToken(channelId)` namespace in addition to `call` + `onProgress`. The `bridge` literal in Shell **must** include it; TypeScript will reject any `Bridge` literal that omits it.
+- `UploadPane` (Task 14) and `SettingsPane` (Task 15) both call `window.khutbah.auth.accessToken/signIn/signOut` on mount. The Shell test must therefore stub all three on the `khutbah.auth` mock, not just `listAccounts`.
+- The Sidebar (Task 19) renders the project's status text/progress alongside each row. So in Shell-level tests, both the error message ("boom") and the "42%" progress string appear in **two** places (sidebar subtitle + main pane). Use `getAllByText(...).length >= 1` rather than `getByText(...)`. The DetectingPane's `progressbar` role still uniquely identifies the main pane.
+
 - [ ] **Step 1: Write the failing test**
 
 ```tsx
 // @vitest-environment jsdom
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { Shell } from '../../src/screens/Shell';
 import { useProjects } from '../../src/store/projects';
 import { useUi } from '../../src/store/ui';
+import { useToasts } from '../../src/store/toasts';
+
+afterEach(() => {
+  cleanup();
+  useProjects.setState({ projects: [] });
+  useUi.setState({ selectedProjectId: null, view: 'review' });
+  useToasts.setState({ toasts: [] });
+});
 
 const ready = {
   id: 'p1',
@@ -3556,19 +3569,31 @@ describe('Shell', () => {
   beforeEach(() => {
     Object.assign(window, {
       khutbah: {
-        auth: { listAccounts: vi.fn(() => Promise.resolve([])) },
-        settings: { get: vi.fn(() => Promise.resolve({ computeDevice: 'auto', outputDir: '/o' })), set: vi.fn() },
-        pipeline: { call: vi.fn(() => Promise.resolve([])), onProgress: vi.fn(() => () => {}) },
-        dialog: { openVideo: vi.fn(), openAudio: vi.fn() },
+        auth: {
+          listAccounts: vi.fn(() => Promise.resolve([])),
+          accessToken: vi.fn(() => Promise.resolve({ accessToken: 'tok' })),
+          signIn: vi.fn(() => Promise.resolve()),
+          signOut: vi.fn(() => Promise.resolve()),
+        },
+        settings: {
+          get: vi.fn(() => Promise.resolve({ computeDevice: 'auto', outputDir: '/o' })),
+          set: vi.fn(() => Promise.resolve({ computeDevice: 'auto', outputDir: '/o' })),
+        },
+        pipeline: {
+          call: vi.fn(() => Promise.resolve([])),
+          onProgress: vi.fn(() => () => {}),
+        },
+        dialog: {
+          openVideo: vi.fn(() => Promise.resolve(null)),
+          openAudio: vi.fn(() => Promise.resolve(null)),
+        },
       },
     });
   });
 
   it('with no project selected: shows EmptyState', () => {
-    useProjects.setState({ projects: [] });
-    useUi.setState({ selectedProjectId: null, view: 'review' });
     render(<Shell />);
-    expect(screen.getByRole('button', { name: /new khutbah/i })).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: /new khutbah/i }).length).toBeGreaterThan(0);
   });
 
   it('with a ready project selected: shows ReviewPane', () => {
@@ -3593,9 +3618,8 @@ describe('Shell', () => {
   });
 
   it('clicking + New khutbah opens the modal', () => {
-    useProjects.setState({ projects: [] });
-    useUi.setState({ selectedProjectId: null, view: 'review' });
     render(<Shell />);
+    // Multiple buttons match: sidebar's "+ New khutbah" + EmptyState's "+ New khutbah"
     fireEvent.click(screen.getAllByRole('button', { name: /\+ new khutbah/i })[0]);
     expect(screen.getByRole('tab', { name: /youtube/i })).toBeTruthy();
   });
@@ -3604,7 +3628,8 @@ describe('Shell', () => {
     useProjects.setState({ projects: [{ ...ready, runState: 'error', lastError: 'boom' }] });
     useUi.setState({ selectedProjectId: 'p1', view: 'review' });
     render(<Shell />);
-    expect(screen.getByText(/boom/)).toBeTruthy();
+    // "boom" appears in both the Sidebar status line and the ErrorPane body.
+    expect(screen.getAllByText(/boom/).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByRole('button', { name: /retry/i })).toBeTruthy();
   });
 
@@ -3612,7 +3637,9 @@ describe('Shell', () => {
     useProjects.setState({ projects: [{ ...ready, runState: 'detecting', progress: 42 }] });
     useUi.setState({ selectedProjectId: 'p1', view: 'review' });
     render(<Shell />);
-    expect(screen.getByText(/42%/)).toBeTruthy();
+    // Sidebar renders "Detecting · 42%"; DetectingPane has its own progressbar.
+    expect(screen.getAllByText(/42%/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByRole('progressbar')).toBeTruthy();
   });
 });
 ```
@@ -3638,18 +3665,31 @@ import { UploadPane } from '../components/UploadPane';
 import { SettingsPane } from '../components/SettingsPane';
 import { Toaster } from '../components/Toaster';
 import { JobManager } from '../jobs/JobManager';
+import type { Bridge, ProgressEvent } from '../jobs/types';
 
-const bridge = {
-  call: <T,>(method: string, params?: unknown) => window.khutbah!.pipeline.call<T>(method, params),
-  onProgress: (l: (ev: { projectId: string; stage: string; pct: number }) => void) =>
-    window.khutbah!.pipeline.onProgress((ev) => l(ev as { projectId: string; stage: string; pct: number })),
+const bridge: Bridge = {
+  call: <T,>(method: string, params?: unknown) =>
+    window.khutbah!.pipeline.call<T>(method, params as object | undefined),
+  onProgress: (l: (ev: ProgressEvent) => void) =>
+    window.khutbah!.pipeline.onProgress((ev) => l(ev as unknown as ProgressEvent)),
+  auth: {
+    accessToken: (channelId: string) =>
+      window.khutbah!.auth.accessToken(channelId) as Promise<{ accessToken: string }>,
+  },
 };
 
 export function Shell() {
   const [modalOpen, setModalOpen] = useState(false);
   const projects = useProjects((s) => s.projects);
-  const { selectedProjectId, view, select, setView } = useUi();
-  const project = useMemo(() => projects.find((p) => p.id === selectedProjectId), [projects, selectedProjectId]);
+  const selectedProjectId = useUi((s) => s.selectedProjectId);
+  const view = useUi((s) => s.view);
+  const select = useUi((s) => s.select);
+  const setView = useUi((s) => s.setView);
+
+  const project = useMemo(
+    () => projects.find((p) => p.id === selectedProjectId),
+    [projects, selectedProjectId],
+  );
   const jm = useMemo(() => new JobManager(bridge), []);
 
   const handleSubmitYoutube = (url: string) => {
@@ -3727,11 +3767,17 @@ Expected: PASS — 7 cases green.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/screens/Shell.tsx tests/renderer/Shell.test.tsx
+git add src/screens/Shell.tsx tests/renderer/Shell.test.tsx \
+  docs/superpowers/plans/2026-04-27-gui-strip-implementation.md
 git commit -m "feat(ui): Shell — two-pane layout switching on view + runState
 
 Single component owns the right-pane swap. JobManager instance is
-created per Shell mount and reused for all start*/retry calls.
+created per Shell mount with a Bridge wrapping window.khutbah.pipeline
++ window.khutbah.auth.accessToken (the latter required since Task 6's
+Bridge.auth namespace).
+
+Plan corrected: Bridge literal needs the auth namespace (Task 6 added
+it but Task 20 plan was written before Task 6 finalized).
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 ```

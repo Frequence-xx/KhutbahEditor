@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useProjects } from '../store/projects';
 import { useUi } from '../store/ui';
 import { Sidebar } from '../components/Sidebar';
@@ -78,20 +78,22 @@ export function Shell() {
     setModalOpen(false);
   };
 
+  // After upload completes, return to review (which now shows the ✓ uploaded
+  // status) so the user isn't stranded on UploadPane with a re-enabled button.
+  useEffect(() => {
+    if (view === 'upload' && project?.runState === 'uploaded') {
+      setView('review');
+    }
+  }, [view, project?.runState, setView]);
+
+  // Priority order: settings → !project → error → detecting/cutting → upload
+  // → review. Error MUST come before upload so an upload failure surfaces
+  // the Retry button instead of leaving an enabled "Upload" button.
   let rightPane;
   if (view === 'settings') {
-    // Settings is reachable from any state, including when no project exists.
     rightPane = <SettingsPane />;
   } else if (!project) {
     rightPane = <EmptyState onNew={() => setModalOpen(true)} />;
-  } else if (view === 'upload') {
-    rightPane = (
-      <UploadPane
-        project={project}
-        projectName={project.sourcePath.split('/').pop() ?? ''}
-        onStart={(opts) => jm.startUpload(project.id, opts)}
-      />
-    );
   } else if (project.runState === 'error') {
     rightPane = (
       <ErrorPane
@@ -105,6 +107,14 @@ export function Shell() {
         projectName={project.sourcePath.split('/').pop() ?? ''}
         progress={project.progress}
         stage={project.runState === 'detecting' ? 'Detecting boundaries' : 'Re-cutting'}
+      />
+    );
+  } else if (view === 'upload') {
+    rightPane = (
+      <UploadPane
+        project={project}
+        projectName={project.sourcePath.split('/').pop() ?? ''}
+        onStart={(opts) => jm.startUpload(project.id, opts)}
       />
     );
   } else {

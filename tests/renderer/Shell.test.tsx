@@ -99,4 +99,30 @@ describe('Shell', () => {
     expect(screen.getAllByText(/42%/).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByRole('progressbar')).toBeTruthy();
   });
+
+  it('error state with view=upload: shows ErrorPane, not UploadPane (C2)', () => {
+    useProjects.setState({
+      projects: [{ ...ready, runState: 'error', lastError: 'upload failed' }],
+    });
+    useUi.setState({ selectedProjectId: 'p1', view: 'upload' });
+    render(<Shell />);
+    expect(screen.getByRole('button', { name: /retry/i })).toBeTruthy();
+    // UploadPane heading must NOT be visible — error takes priority
+    expect(screen.queryByText(/Upload to YouTube/i)).toBeNull();
+  });
+
+  it('upload completes (runState=uploaded) while view=upload: redirects to review (C3)', async () => {
+    useProjects.setState({ projects: [{ ...ready, runState: 'uploading' }] });
+    useUi.setState({ selectedProjectId: 'p1', view: 'upload' });
+    const { rerender } = render(<Shell />);
+    expect(screen.queryByRole('tab', { name: /part 1/i })).toBeNull();
+
+    // Simulate upload completion.
+    useProjects.setState({ projects: [{ ...ready, runState: 'uploaded' }] });
+    rerender(<Shell />);
+    // View should now be 'review' and ReviewPane visible.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(useUi.getState().view).toBe('review');
+    expect(screen.getByRole('tab', { name: /part 1/i })).toBeTruthy();
+  });
 });

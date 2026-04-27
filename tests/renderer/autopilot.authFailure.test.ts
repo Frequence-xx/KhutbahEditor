@@ -93,7 +93,7 @@ describe('runAutoPilot — auth failure isolation', () => {
       sourcePath: '/tmp/in.mp4',
       duration: 1500,
       createdAt: Date.now(),
-      status: 'draft' as const,
+      runState: 'idle' as const,
     };
     const result = await runAutoPilot(project, () => undefined);
 

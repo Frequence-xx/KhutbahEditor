@@ -1,4 +1,4 @@
-import type { Project } from '../store/projects';
+import type { Part, PartUploadResult, Project } from '../store/projects';
 import { useProjects } from '../store/projects';
 import { useSettings } from '../store/settings';
 import { applyTemplate, langSuffix } from './templates';
@@ -158,7 +158,7 @@ export async function runAutoPilot(
   if (targets.length === 0) {
     // Nothing to upload to — record export-only result and return.
     useProjects.getState().update(project.id, {
-      status: 'processed',
+      runState: 'ready',
       part1: { start: detection.part1.start, end: detection.part1.end, outputPath: p1Out },
       part2: { start: detection.part2.start, end: detection.part2.end, outputPath: p2Out },
     });
@@ -292,35 +292,48 @@ export async function runAutoPilot(
   const anyFailures = Object.values(uploads).some((u) => u.errors.length > 0 || !u.p1 || !u.p2);
   const partialMode: AutoPilotStage = anyFailures ? 'partial_failure' : 'auto_complete';
 
-  useProjects.getState().update(project.id, {
-    status: anyFailures ? 'failed' : 'uploaded',
-    part1: {
-      start: detection.part1.start,
-      end: detection.part1.end,
-      confidence: detection.part1.confidence,
-      transcript: detection.part1.transcript_at_start,
-      outputPath: p1Out,
-      uploads: Object.fromEntries(
-        Object.entries(uploads).map(([ch, u]) => [
-          ch,
-          { videoId: u.p1, status: u.p1 ? 'done' : 'failed', error: u.errors.find((e) => e.includes('part 1')) },
-        ]),
-      ),
-    },
-    part2: {
-      start: detection.part2.start,
-      end: detection.part2.end,
-      confidence: detection.part2.confidence,
-      transcript: detection.part2.transcript_at_end,
-      outputPath: p2Out,
-      uploads: Object.fromEntries(
-        Object.entries(uploads).map(([ch, u]) => [
-          ch,
-          { videoId: u.p2, status: u.p2 ? 'done' : 'failed', error: u.errors.find((e) => e.includes('part 2')) },
-        ]),
-      ),
-    },
-  });
+  const part1Patch: Part = {
+    start: detection.part1.start,
+    end: detection.part1.end,
+    confidence: detection.part1.confidence,
+    transcript: detection.part1.transcript_at_start,
+    outputPath: p1Out,
+    uploads: Object.fromEntries(
+      Object.entries(uploads).map(([ch, u]) => [
+        ch,
+        { videoId: u.p1, status: (u.p1 ? 'done' : 'failed') as PartUploadResult['status'], error: u.errors.find((e) => e.includes('part 1')) },
+      ]),
+    ),
+  };
+  const part2Patch: Part = {
+    start: detection.part2.start,
+    end: detection.part2.end,
+    confidence: detection.part2.confidence,
+    transcript: detection.part2.transcript_at_end,
+    outputPath: p2Out,
+    uploads: Object.fromEntries(
+      Object.entries(uploads).map(([ch, u]) => [
+        ch,
+        { videoId: u.p2, status: (u.p2 ? 'done' : 'failed') as PartUploadResult['status'], error: u.errors.find((e) => e.includes('part 2')) },
+      ]),
+    ),
+  };
+
+  if (anyFailures) {
+    // Persist parts first, then mark as errored so the error pane shows them.
+    useProjects.getState().update(project.id, { part1: part1Patch, part2: part2Patch });
+    const summary = Object.entries(uploads)
+      .filter(([, u]) => u.errors.length > 0 || !u.p1 || !u.p2)
+      .map(([ch, u]) => `${ch}: ${u.errors.join('; ') || 'incomplete upload'}`)
+      .join(' | ');
+    useProjects.getState().setError(project.id, summary || 'autopilot upload partial failure', 'upload');
+  } else {
+    useProjects.getState().update(project.id, {
+      runState: 'uploaded',
+      part1: part1Patch,
+      part2: part2Patch,
+    });
+  }
 
   return { mode: partialMode, detection, uploads };
   } finally {

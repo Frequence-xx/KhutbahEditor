@@ -3851,56 +3851,98 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 
 ---
 
-### Task 22: Rewire `lib/autopilot.ts` to use JobManager
+### Task 22: Minimum rewire of `lib/autopilot.ts` (Project.status → runState)
+
+> **Scope reduction (2026-04-27):** the original draft of this task envisioned
+> a full rewire of `autopilot.ts` to route detection / cut / upload through
+> the new `JobManager`. That was descoped to the minimum needed to keep the
+> module type-clean and its existing test passing. Reasons:
+>
+> 1. **JobManager is single-channel.** Each project has one Toaster +
+>    status-badge surface. Autopilot is **multi-channel fanout** — one upload
+>    per auto-publish account, with per-account error isolation. JobManager
+>    has no concept of N parallel uploads sharing one project; routing
+>    through it would require either growing JobManager into a multi-channel
+>    primitive, or shoehorning autopilot into a single-channel shape and
+>    losing the per-account isolation.
+> 2. **Nothing in the new Shell calls autopilot today.** App.tsx renders
+>    only `<Shell />`; Shell drives all per-project work through JobManager
+>    directly (`startDetect` / `startCut` / `startUpload`). `runAutoPilot`
+>    is **orphaned-but-functional** — no caller in the renderer reaches it.
+>    A full integration would be a large change with zero current consumer.
+> 3. **Future option remains open.** When JobManager grows multi-channel
+>    upload support (or when autopilot gains a Shell-driven entry point),
+>    this task can be revisited. For now, autopilot.ts compiles, its
+>    existing test passes, and it stays available for whatever comes next.
+>
+> **The actual change**: Task 1 removed `Project.status`; this task migrates
+> the two `update(projectId, { status: ... })` call-sites to use the new
+> `runState` field (and `setError` for the failure path).
 
 **Files:**
 - Modify: `src/lib/autopilot.ts`
-- Test: existing `tests/renderer/autopilot.authFailure.test.ts` (must continue to pass)
+- Modify: `tests/renderer/autopilot.authFailure.test.ts` (one literal: `status: 'draft'` → `runState: 'idle'`)
 
-- [ ] **Step 1: Read `src/lib/autopilot.ts`** in full. Identify the inlined RPC sequence (detect → smart_cut → upload).
+**Mapping applied** (matches the migration in `src/store/projects.ts`):
 
-- [ ] **Step 2: Refactor `maybeAutoPilot()` and the orchestration helpers** to import and call `JobManager` instead of inlining `window.khutbah.pipeline.call(...)`. The detection / cut / upload calls funnel through `JobManager` so the same Toaster + status-badge updates apply.
+| Old `status` value | New `runState` (writer) |
+|--------------------|--------------------------|
+| `'draft'`          | `'idle'` (default for new projects; autopilot never wrote this) |
+| `'processed'`      | `'ready'` (via `update`) |
+| `'uploaded'`       | `'uploaded'` (via `update`) |
+| `'failed'`         | `'error'` (via `setError(id, summary, 'upload')`) |
 
-Sketch (adapt to actual structure of the file):
+- [ ] **Step 1: Replace status writes in `runAutoPilot`**
+  - Line 161 (export-only path, no auto-publish accounts): `status: 'processed'` → `runState: 'ready'`.
+  - Line 296 (terminal write after upload fanout): split into two branches —
+    success uses `update(id, { runState: 'uploaded', part1, part2 })`; failure
+    persists `part1`/`part2` then calls `setError(id, summary, 'upload')` so
+    the error pane has the per-account error string and a `lastFailedKind`
+    of `'upload'` (which the new Retry button can resume from).
 
-```ts
-import { JobManager } from '../jobs/JobManager';
-
-const bridge = {
-  call: <T,>(method: string, params?: unknown) => window.khutbah!.pipeline.call<T>(method, params),
-  onProgress: (l: (ev: { projectId: string; stage: string; pct: number }) => void) =>
-    window.khutbah!.pipeline.onProgress((ev) => l(ev as never)),
-};
-
-const jm = new JobManager(bridge);
-
-export async function maybeAutoPilot(/* ... */): Promise<void> {
-  // ... existing pre-flight checks ...
-  jm.startDetect(projectId);
-  // detection completion is observed via project.runState — autopilot can poll
-  // or subscribe; if it currently inlines an await, replace with a small helper
-  // that resolves when runState transitions out of 'detecting'.
-}
-```
+- [ ] **Step 2: Update the test fixture**
+  - In `tests/renderer/autopilot.authFailure.test.ts`, the `project` literal
+    drops `status: 'draft' as const` in favor of `runState: 'idle' as const`.
+    No assertion changes are needed — the test verifies the in-memory
+    `result.uploads` map and `result.mode`, neither of which moved.
 
 - [ ] **Step 3: Run the existing autopilot test**
 
 Run: `npx vitest run tests/renderer/autopilot.authFailure.test.ts`
-Expected: PASS. If the test fails because the test mocked the inline RPC sequence, update the test to mock the same `window.khutbah.pipeline.call` seam — JobManager calls through it identically.
+Expected: PASS.
 
 - [ ] **Step 4: Run the full renderer suite**
 
 Run: `npx vitest run tests/renderer`
-Expected: PASS for everything.
+Expected: 124/124 PASS (autopilot test was already in that count).
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Confirm autopilot.ts is type-clean**
+
+Run: `npx tsc --noEmit 2>&1 | grep "lib/autopilot.ts" || echo "autopilot.ts type-clean"`
+Expected: `autopilot.ts type-clean`. (Tasks 23-24 still need to delete
+`src/editor/*` and obsolete `src/screens/*`, so the rest of the project may
+still report errors at this point — that is expected and tracked there.)
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add src/lib/autopilot.ts tests/renderer/autopilot.authFailure.test.ts
-git commit -m "refactor(autopilot): route detection + upload through JobManager
+git add src/lib/autopilot.ts tests/renderer/autopilot.authFailure.test.ts \
+  docs/superpowers/plans/2026-04-27-gui-strip-implementation.md
+git commit -m "refactor(autopilot): migrate Project.status references to runState
 
-Same RPC contract; autopilot now uses the same orchestration as the
-Shell so status badges and Toaster fire identically for autopilot runs.
+Minimum rewire to keep autopilot.ts type-clean and its existing test
+passing now that Task 1 removed the legacy Project.status field. The
+plan's \"route through JobManager\" was descoped: JobManager is
+single-channel; autopilot is multi-channel fanout. Nothing in the new
+Shell flow calls autopilot today — it's orphaned-but-functional. A
+full integration would need JobManager to grow multi-channel support
+first.
+
+Mappings applied:
+- 'processed' → runState: 'ready'
+- 'failed'    → runState: 'error' (via setError)
+- 'uploaded'  → runState: 'uploaded'
+- 'draft'     → no longer needed (new projects start as 'idle')
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 ```

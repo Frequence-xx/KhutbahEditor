@@ -2481,9 +2481,11 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 
 ```tsx
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import { UploadPane } from '../../src/components/UploadPane';
+
+afterEach(cleanup);
 
 const project = {
   id: 'p1', sourcePath: '/s.mp4', duration: 200, createdAt: 1, runState: 'ready' as const,
@@ -2496,24 +2498,42 @@ describe('UploadPane', () => {
     Object.assign(window, {
       khutbah: {
         auth: {
-          listAccounts: vi.fn(() => Promise.resolve([{ channelId: 'ch-1', name: 'Frequence' }])),
-          accessToken: vi.fn(() => Promise.resolve('tkn')),
+          listAccounts: vi.fn(() => Promise.resolve([
+            { channelId: 'ch-1', channelTitle: 'Frequence', autoPublish: true },
+          ])),
+          accessToken: vi.fn(() => Promise.resolve({ accessToken: 'tkn' })),
         },
-        pipeline: { call: vi.fn(() => Promise.resolve([])) }, // for playlists.list
+        pipeline: {
+          call: vi.fn((method: string) => {
+            if (method === 'playlists.list') return Promise.resolve([]);
+            return Promise.reject(new Error('unexpected ' + method));
+          }),
+        },
+        dialog: {
+          openVideo: vi.fn(() => Promise.resolve(null)),
+          openAudio: vi.fn(() => Promise.resolve(null)),
+        },
       },
     });
   });
 
-  it('pre-fills the title input from project name + suffix', async () => {
+  it('pre-fills the title input from project name', async () => {
     render(<UploadPane project={project} projectName="Iziyi" onStart={() => {}} />);
     const input = await screen.findByDisplayValue(/Iziyi/);
     expect(input).toBeTruthy();
   });
 
+  it('renders the account by channelTitle', async () => {
+    render(<UploadPane project={project} projectName="Iziyi" onStart={() => {}} />);
+    await screen.findByText(/Frequence/);
+  });
+
   it('clicking Upload calls onStart with channelId, title, playlistId, thumbnailPath', async () => {
     const onStart = vi.fn();
     render(<UploadPane project={project} projectName="Iziyi" onStart={onStart} />);
-    await screen.findByRole('button', { name: /upload/i });
+    await waitFor(() => {
+      expect((screen.getByRole('button', { name: /upload/i }) as HTMLButtonElement).disabled).toBe(false);
+    });
     fireEvent.click(screen.getByRole('button', { name: /upload/i }));
     expect(onStart).toHaveBeenCalledWith(expect.objectContaining({
       channelId: 'ch-1',
@@ -2547,7 +2567,7 @@ import { useEffect, useState } from 'react';
 import type { Project } from '../store/projects';
 import type { UploadOpts } from '../jobs/types';
 
-type Account = { channelId: string; name: string };
+type Account = { channelId: string; channelTitle: string };
 type Playlist = { id: string; title: string };
 
 export type UploadPaneProps = {
@@ -2565,18 +2585,37 @@ export function UploadPane({ project, projectName, onStart }: UploadPaneProps) {
   const [thumbnailPath, setThumbnailPath] = useState<string>('');
 
   useEffect(() => {
-    window.khutbah?.auth.listAccounts().then((a) => {
-      setAccounts(a);
-      if (a[0]) setChannelId(a[0].channelId);
+    void window.khutbah?.auth.listAccounts().then((a) => {
+      const list = a as unknown as Account[];
+      setAccounts(list);
+      if (list[0]) setChannelId(list[0].channelId);
     });
   }, []);
 
   useEffect(() => {
     if (!channelId) return;
-    window.khutbah?.pipeline
-      .call<Playlist[]>('playlists.list', { channelId })
-      .then(setPlaylists)
-      .catch(() => setPlaylists([]));
+    let cancelled = false;
+    (async () => {
+      try {
+        const { accessToken } = await window.khutbah!.auth.accessToken(channelId);
+        if (cancelled) return;
+        const res = await window.khutbah!.pipeline.call<
+          Array<{ id: string; snippet?: { title?: string }; title?: string }>
+        >('playlists.list', { access_token: accessToken });
+        if (cancelled) return;
+        setPlaylists(
+          res.map((p) => ({
+            id: p.id,
+            title: p.snippet?.title ?? p.title ?? p.id,
+          })),
+        );
+      } catch {
+        if (!cancelled) setPlaylists([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [channelId]);
 
   const inFlight = project.runState === 'uploading';
@@ -2592,7 +2631,7 @@ export function UploadPane({ project, projectName, onStart }: UploadPaneProps) {
         className="px-3 py-2 bg-slate-900 border border-slate-700 text-slate-100 rounded"
       >
         {accounts.map((a) => (
-          <option key={a.channelId} value={a.channelId}>{a.name}</option>
+          <option key={a.channelId} value={a.channelId}>{a.channelTitle}</option>
         ))}
       </select>
 
@@ -2657,12 +2696,13 @@ export function UploadPane({ project, projectName, onStart }: UploadPaneProps) {
 - [ ] **Step 5: Run test to verify it passes**
 
 Run: `npx vitest run tests/renderer/UploadPane.test.tsx`
-Expected: PASS — 3 cases green.
+Expected: PASS — 4 cases green.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/components/UploadPane.tsx tests/renderer/UploadPane.test.tsx
+git add src/components/UploadPane.tsx tests/renderer/UploadPane.test.tsx \
+  docs/superpowers/plans/2026-04-27-gui-strip-implementation.md
 git commit -m "feat(ui): UploadPane — account/title/playlist/thumbnail picker
 
 Adapted from src/screens/Upload.tsx as a pane (no internal navigation).
@@ -2670,6 +2710,12 @@ Calls back to caller via onStart so the Shell can route to JobManager.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 ```
+
+**Contract notes (corrected from original plan draft):**
+
+- `YouTubeAccount` shape (per `electron/auth/accounts.ts:3-27`) is `{ channelId, channelTitle, thumbnailUrl, signedInAt, autoPublish, … }` — note `channelTitle`, not `name`. UI uses `account.channelTitle` and the listAccounts mock returns `{ channelId, channelTitle, autoPublish }`.
+- `auth.accessToken(channelId)` returns `Promise<{ accessToken: string; expiresAt: number }>` (per `src/types/global.d.ts`), not a raw string. Mock with `Promise.resolve({ accessToken: 'tkn' })` and destructure `{ accessToken }` in the renderer.
+- `playlists.list` sidecar handler (`python-pipeline/khutbah_pipeline/__main__.py:225`) is `_list_playlists(access_token: str)` — takes `access_token`, not `channelId`. UploadPane resolves the access token first via `auth.accessToken(channelId)` then calls `pipeline.call('playlists.list', { access_token })`. Returns YouTube API playlist objects with `id` and `snippet.title`; renderer is permissive about the shape (tries `snippet.title`, then `title`, then `id`).
 
 ---
 

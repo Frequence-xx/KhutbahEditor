@@ -10,19 +10,7 @@ import { ErrorPane } from '../components/ErrorPane';
 import { UploadPane } from '../components/UploadPane';
 import { SettingsPane } from '../components/SettingsPane';
 import { Toaster } from '../components/Toaster';
-import { JobManager } from '../jobs/JobManager';
-import type { Bridge, ProgressEvent } from '../jobs/types';
-
-const bridge: Bridge = {
-  call: <T,>(method: string, params?: unknown) =>
-    window.khutbah!.pipeline.call<T>(method, params as object | undefined),
-  onProgress: (l: (ev: ProgressEvent) => void) =>
-    window.khutbah!.pipeline.onProgress((ev) => l(ev as unknown as ProgressEvent)),
-  auth: {
-    accessToken: (channelId: string) =>
-      window.khutbah!.auth.accessToken(channelId) as Promise<{ accessToken: string }>,
-  },
-};
+import { getJobManager } from '../jobs/instance';
 
 export function Shell() {
   const [modalOpen, setModalOpen] = useState(false);
@@ -36,7 +24,7 @@ export function Shell() {
     () => projects.find((p) => p.id === selectedProjectId),
     [projects, selectedProjectId],
   );
-  const jm = useMemo(() => new JobManager(bridge), []);
+  const jm = getJobManager();
 
   const handleSubmitYoutube = (url: string) => {
     const id = `proj-${Date.now()}`;

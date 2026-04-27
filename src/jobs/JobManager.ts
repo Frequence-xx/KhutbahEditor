@@ -47,6 +47,24 @@ export class JobManager {
 
     useProjects.getState().setRunState(projectId, 'detecting');
 
+    // Best-effort thumbnail extraction (spec §6). Failure must not block detection.
+    this.bridge
+      .call<{ paths: string[] }>('edit.thumbnails', {
+        src: project.sourcePath,
+        output_dir: project.sourcePath + '.thumbs',
+        count: 1,
+      })
+      .then((res) => {
+        if (abort.signal.aborted) return;
+        const path = res.paths[0];
+        if (path) {
+          useProjects.getState().update(projectId, { thumbnailPath: path });
+        }
+      })
+      .catch(() => {
+        /* ignore thumbnail failures */
+      });
+
     this.bridge
       .call<DetectionResult>('detect.run', { audio_path: project.sourcePath })
       .then((res) => {

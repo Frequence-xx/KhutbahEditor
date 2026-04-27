@@ -749,56 +749,93 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 
 Spec §6 requires `thumbnailPath` to be populated as the first step of `startDetect` (or after `ingest.youtube_download` for remote sources, since the file isn't yet on disk). Sidebar rows render a neutral placeholder while it's undefined.
 
+The actual sidecar contract for `edit.thumbnails` (see `python-pipeline/khutbah_pipeline/__main__.py:101-103` and the existing caller at `src/lib/autopilot.ts:140-146`) is:
+
+```python
+@register("edit.thumbnails")
+def _thumbs(src: str, output_dir: str, count: int = 6) -> dict[str, list[str]]:
+    return {"paths": extract_candidates(src, output_dir, count)}
+```
+
+For Task 4b's purpose (one quick thumbnail of the source for the sidebar), pass `src: project.sourcePath`, `output_dir: project.sourcePath + '.thumbs'` (sibling-dir pattern matching autopilot's `p1Out + '.thumbs'`), and `count: 1`. Take `paths[0]` as the `thumbnailPath`. Guard against the empty-array case.
+
 - [ ] **Step 1: Write the failing test**
 
 ```ts
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { JobManager } from '../../src/jobs/JobManager';
+import type { Bridge } from '../../src/jobs/types';
 import { useProjects } from '../../src/store/projects';
+
+const detectOk = {
+  duration: 200,
+  part1: { start: 10, end: 100, confidence: 0.95 },
+  part2: { start: 110, end: 195, confidence: 0.95 },
+  lang_dominant: 'ar',
+  overall_confidence: 0.95,
+};
 
 describe('JobManager.startDetect — thumbnail', () => {
   beforeEach(() => {
     useProjects.setState({
-      projects: [{ id: 'p1', sourcePath: '/tmp/src.mp4', duration: 1, createdAt: 1, runState: 'idle' }],
+      projects: [
+        { id: 'p1', sourcePath: '/tmp/src.mp4', duration: 1, createdAt: 1, runState: 'idle' },
+      ],
     });
   });
 
-  it('calls edit.thumbnails for the source before detect.run resolves', async () => {
+  it('calls edit.thumbnails for the source before detect.run resolves and writes thumbnailPath', async () => {
     const calls: string[] = [];
-    const call = vi.fn((method: string) => {
+    const call = vi.fn((method: string, params?: unknown) => {
       calls.push(method);
-      if (method === 'edit.thumbnails') return Promise.resolve({ path: '/cache/thumb.jpg' });
-      if (method === 'detect.run') return Promise.resolve({
-        part1: { start: 0, end: 1, confidence: 0.95 },
-        part2: { start: 1, end: 2, confidence: 0.95 },
-      });
+      if (method === 'edit.thumbnails') {
+        expect(params).toMatchObject({ src: '/tmp/src.mp4', count: 1 });
+        return Promise.resolve({ paths: ['/tmp/src.mp4.thumbs/0.jpg'] });
+      }
+      if (method === 'detect.run') return Promise.resolve(detectOk);
       return Promise.reject(new Error('unexpected method ' + method));
     });
-    const jm = new JobManager({ call, onProgress: vi.fn(() => () => {}) });
+    const bridge: Bridge = { call: call as Bridge['call'], onProgress: vi.fn(() => () => {}) };
+    const jm = new JobManager(bridge);
 
     jm.startDetect('p1');
     await new Promise((r) => setTimeout(r, 0));
     await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
 
+    expect(calls.indexOf('edit.thumbnails')).toBeGreaterThanOrEqual(0);
     expect(calls.indexOf('edit.thumbnails')).toBeLessThan(calls.indexOf('detect.run'));
-    expect(useProjects.getState().projects[0].thumbnailPath).toBe('/cache/thumb.jpg');
+    expect(useProjects.getState().projects[0].thumbnailPath).toBe('/tmp/src.mp4.thumbs/0.jpg');
   });
 
   it('a thumbnail failure does not block detection', async () => {
     const call = vi.fn((method: string) => {
       if (method === 'edit.thumbnails') return Promise.reject(new Error('ffmpeg fail'));
-      if (method === 'detect.run') return Promise.resolve({
-        part1: { start: 0, end: 1, confidence: 0.95 },
-        part2: { start: 1, end: 2, confidence: 0.95 },
-      });
+      if (method === 'detect.run') return Promise.resolve(detectOk);
       return Promise.reject(new Error('unexpected ' + method));
     });
-    const jm = new JobManager({ call, onProgress: vi.fn(() => () => {}) });
+    const bridge: Bridge = { call: call as Bridge['call'], onProgress: vi.fn(() => () => {}) };
+    const jm = new JobManager(bridge);
 
     jm.startDetect('p1');
     await new Promise((r) => setTimeout(r, 5));
 
     expect(useProjects.getState().projects[0].runState).toBe('ready');
+    expect(useProjects.getState().projects[0].thumbnailPath).toBeUndefined();
+  });
+
+  it('an empty paths array does not write a thumbnailPath', async () => {
+    const call = vi.fn((method: string) => {
+      if (method === 'edit.thumbnails') return Promise.resolve({ paths: [] });
+      if (method === 'detect.run') return Promise.resolve(detectOk);
+      return Promise.reject(new Error('unexpected ' + method));
+    });
+    const bridge: Bridge = { call: call as Bridge['call'], onProgress: vi.fn(() => () => {}) };
+    const jm = new JobManager(bridge);
+
+    jm.startDetect('p1');
+    await new Promise((r) => setTimeout(r, 5));
+
     expect(useProjects.getState().projects[0].thumbnailPath).toBeUndefined();
   });
 });
@@ -811,23 +848,29 @@ Expected: FAIL — `edit.thumbnails` is not called.
 
 - [ ] **Step 3: Update `startDetect` in `src/jobs/JobManager.ts`** to extract the thumbnail before `detect.run`:
 
-Inside `startDetect`, replace the `useProjects.getState().setRunState(projectId, 'detecting');` line with:
+Inside `startDetect`, after the `useProjects.getState().setRunState(projectId, 'detecting');` line and before the `this.bridge.call<DetectionResult>('detect.run', ...)` chain, add:
 
 ```ts
-useProjects.getState().setRunState(projectId, 'detecting');
-
 // Best-effort thumbnail extraction (spec §6). Failure must not block detection.
 this.bridge
-  .call<{ path: string }>('edit.thumbnails', {
-    projectId,
-    sourcePath: project.sourcePath,
-    timestampSec: 30,
+  .call<{ paths: string[] }>('edit.thumbnails', {
+    src: project.sourcePath,
+    output_dir: project.sourcePath + '.thumbs',
+    count: 1,
   })
   .then((res) => {
-    useProjects.getState().update(projectId, { thumbnailPath: res.path });
+    if (abort.signal.aborted) return;
+    const path = res.paths[0];
+    if (path) {
+      useProjects.getState().update(projectId, { thumbnailPath: path });
+    }
   })
-  .catch(() => { /* ignore thumbnail failures */ });
+  .catch(() => {
+    /* ignore thumbnail failures */
+  });
 ```
+
+The `if (abort.signal.aborted) return;` guard mirrors the Task 4 cancel pattern — if the user cancels detect mid-thumbnail, we shouldn't write the thumbnail anyway. The `if (path)` guard handles the empty-array case from the sidecar (e.g. ffmpeg produced no candidates).
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -840,9 +883,10 @@ Expected: PASS for both files.
 git add src/jobs/JobManager.ts tests/renderer/JobManager.thumbnail.test.ts
 git commit -m "feat(jobs): JobManager.startDetect populates thumbnailPath best-effort
 
-Calls edit.thumbnails for the source's 30s mark and writes the result
-into project.thumbnailPath. Failures are swallowed silently so detect.run
-proceeds regardless. Per spec §6 'Thumbnail generation'.
+Calls edit.thumbnails for the source with count=1 and stores the first
+returned path into project.thumbnailPath. Failures (rejected promise,
+empty paths array, late resolve after cancel) are swallowed silently
+so detect.run proceeds regardless. Per spec §6 'Thumbnail generation'.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 ```

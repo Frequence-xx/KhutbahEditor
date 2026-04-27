@@ -1,9 +1,7 @@
 // @vitest-environment jsdom
-import { describe, it, expect, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { describe, it, expect } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { ReviewPane } from '../../src/components/ReviewPane';
-
-afterEach(cleanup);
 
 const project = {
   id: 'p1',

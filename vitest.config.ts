@@ -5,5 +5,6 @@ export default defineConfig({
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
     testTimeout: 30000,    // 30s per test (AGENTS.md policy)
     hookTimeout: 30000,    // beforeAll/afterAll same
+    setupFiles: ['./tests/renderer/setup.ts'],
   },
 });

@@ -1,9 +1,7 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { NewKhutbahModal } from '../../src/components/NewKhutbahModal';
-
-afterEach(cleanup);
 
 describe('NewKhutbahModal', () => {
   const noop = () => {};

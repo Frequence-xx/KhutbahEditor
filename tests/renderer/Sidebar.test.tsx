@@ -1,10 +1,8 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { Sidebar } from '../../src/components/Sidebar';
 import { useProjects } from '../../src/store/projects';
-
-afterEach(cleanup);
 
 describe('Sidebar', () => {
   beforeEach(() => {

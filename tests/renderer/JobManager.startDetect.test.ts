@@ -10,6 +10,15 @@ const seed = () =>
     ],
   });
 
+const makeBridge = (
+  call: Bridge['call'],
+  onProgress: Bridge['onProgress'] = vi.fn(() => () => {}),
+): Bridge => ({
+  call,
+  onProgress,
+  auth: { accessToken: vi.fn(() => Promise.resolve({ accessToken: 'mock-token' })) },
+});
+
 describe('JobManager.startDetect', () => {
   beforeEach(() => {
     seed();
@@ -20,12 +29,8 @@ describe('JobManager.startDetect', () => {
     const callPromise = new Promise((r) => {
       resolve = r;
     });
-    const bridge: Bridge = {
-      call: vi.fn(() => callPromise),
-      onProgress: vi.fn(() => () => {}),
-      auth: { accessToken: vi.fn(() => Promise.resolve({ accessToken: 'mock-token' })) },
-    };
-    const jm = new JobManager(bridge);
+    const call = vi.fn(() => callPromise);
+    const jm = new JobManager(makeBridge(call as Bridge['call']));
 
     jm.startDetect('p1');
     expect(useProjects.getState().projects[0].runState).toBe('detecting');
@@ -47,20 +52,16 @@ describe('JobManager.startDetect', () => {
   });
 
   it('transitions to needs_review when overall_confidence < 0.9', async () => {
-    const bridge: Bridge = {
-      call: vi.fn(() =>
-        Promise.resolve({
-          duration: 200,
-          part1: { start: 10, end: 100, confidence: 0.95 },
-          part2: { start: 110, end: 200, confidence: 0.71 },
-          lang_dominant: 'ar',
-          overall_confidence: 0.71,
-        }),
-      ),
-      onProgress: vi.fn(() => () => {}),
-      auth: { accessToken: vi.fn(() => Promise.resolve({ accessToken: 'mock-token' })) },
-    };
-    const jm = new JobManager(bridge);
+    const call = vi.fn(() =>
+      Promise.resolve({
+        duration: 200,
+        part1: { start: 10, end: 100, confidence: 0.95 },
+        part2: { start: 110, end: 200, confidence: 0.71 },
+        lang_dominant: 'ar',
+        overall_confidence: 0.71,
+      }),
+    );
+    const jm = new JobManager(makeBridge(call as Bridge['call']));
 
     jm.startDetect('p1');
     await new Promise((r) => setTimeout(r, 0));
@@ -69,14 +70,11 @@ describe('JobManager.startDetect', () => {
   });
 
   it('transitions to error and stores lastError when call rejects', async () => {
-    const bridge: Bridge = {
-      call: vi.fn(() => Promise.reject(new Error('sidecar crash'))),
-      onProgress: vi.fn(() => () => {}),
-      auth: { accessToken: vi.fn(() => Promise.resolve({ accessToken: 'mock-token' })) },
-    };
-    const jm = new JobManager(bridge);
+    const call = vi.fn(() => Promise.reject(new Error('sidecar crash')));
+    const jm = new JobManager(makeBridge(call as Bridge['call']));
 
     jm.startDetect('p1');
+    await new Promise((r) => setTimeout(r, 0));
     await new Promise((r) => setTimeout(r, 0));
 
     const p = useProjects.getState().projects[0];
@@ -86,15 +84,12 @@ describe('JobManager.startDetect', () => {
 
   it('forwards progress events for the same projectId to setProgress', async () => {
     let listener!: (ev: ProgressEvent) => void;
-    const bridge: Bridge = {
-      call: vi.fn(() => new Promise(() => {})),
-      onProgress: vi.fn((l) => {
-        listener = l;
-        return () => {};
-      }),
-      auth: { accessToken: vi.fn(() => Promise.resolve({ accessToken: 'mock-token' })) },
-    };
-    const jm = new JobManager(bridge);
+    const call = vi.fn(() => new Promise(() => {}));
+    const onProgress = vi.fn((l: (ev: ProgressEvent) => void) => {
+      listener = l;
+      return () => {};
+    });
+    const jm = new JobManager(makeBridge(call as Bridge['call'], onProgress));
     jm.startDetect('p1');
 
     listener({ projectId: 'p1', stage: 'transcribe', pct: 42 });
@@ -105,25 +100,19 @@ describe('JobManager.startDetect', () => {
   });
 
   it('does nothing when projectId is unknown — no bridge call, no listener leak', () => {
-    const bridge: Bridge = {
-      call: vi.fn(),
-      onProgress: vi.fn(() => () => {}),
-      auth: { accessToken: vi.fn(() => Promise.resolve({ accessToken: 'mock-token' })) },
-    };
+    const call = vi.fn();
+    const onProgress = vi.fn(() => () => {});
+    const bridge = makeBridge(call as Bridge['call'], onProgress);
     const jm = new JobManager(bridge);
     jm.startDetect('does-not-exist');
-    expect(bridge.call).not.toHaveBeenCalled();
-    expect(bridge.onProgress).not.toHaveBeenCalled();
+    expect(call).not.toHaveBeenCalled();
+    expect(onProgress).not.toHaveBeenCalled();
     expect(jm.isRunning('does-not-exist')).toBe(false);
   });
 
   it('handles { error } response from sidecar by setting runState=error', async () => {
-    const bridge: Bridge = {
-      call: vi.fn(() => Promise.resolve({ error: 'opening_not_found' })),
-      onProgress: vi.fn(() => () => {}),
-      auth: { accessToken: vi.fn(() => Promise.resolve({ accessToken: 'mock-token' })) },
-    };
-    const jm = new JobManager(bridge);
+    const call = vi.fn(() => Promise.resolve({ error: 'opening_not_found' }));
+    const jm = new JobManager(makeBridge(call as Bridge['call']));
     jm.startDetect('p1');
     await new Promise((r) => setTimeout(r, 0));
     const p = useProjects.getState().projects[0];
@@ -133,17 +122,13 @@ describe('JobManager.startDetect', () => {
 
   it('cancel() during detection prevents the late resolve from clobbering state', async () => {
     let resolve!: (v: unknown) => void;
-    const bridge: Bridge = {
-      call: vi.fn(
-        () =>
-          new Promise((r) => {
-            resolve = r;
-          }),
-      ),
-      onProgress: vi.fn(() => () => {}),
-      auth: { accessToken: vi.fn(() => Promise.resolve({ accessToken: 'mock-token' })) },
-    };
-    const jm = new JobManager(bridge);
+    const call = vi.fn(
+      () =>
+        new Promise((r) => {
+          resolve = r;
+        }),
+    );
+    const jm = new JobManager(makeBridge(call as Bridge['call']));
     jm.startDetect('p1');
     expect(useProjects.getState().projects[0].runState).toBe('detecting');
     jm.cancel('p1');

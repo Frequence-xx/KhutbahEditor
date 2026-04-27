@@ -1,9 +1,7 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { ErrorPane } from '../../src/components/ErrorPane';
-
-afterEach(cleanup);
 
 describe('ErrorPane', () => {
   it('renders the error message and a Retry button', () => {

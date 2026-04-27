@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from 'vitest';
-import { useProjects } from '../../src/store/projects';
+import { useProjects, type Project } from '../../src/store/projects';
 
 const seed = (overrides = {}) => ({
   id: 'p1',
@@ -62,14 +62,14 @@ describe('projects store — runState fields', () => {
 
   it('migration v1: legacy "draft" status maps to runState=idle', () => {
     const persisted = { state: { projects: [{ id: 'old', sourcePath: '/x', duration: 1, createdAt: 1, status: 'draft' }] }, version: 0 };
-    const migrated = useProjects.persist.getOptions().migrate!(persisted.state, 0) as { projects: any[] };
+    const migrated = useProjects.persist.getOptions().migrate!(persisted.state, 0) as { projects: Project[] };
     expect(migrated.projects[0].runState).toBe('idle');
-    expect(migrated.projects[0].status).toBeUndefined();
+    expect((migrated.projects[0] as Project & { status?: string }).status).toBeUndefined();
   });
 
   it('migration v1: legacy "uploaded" status maps to runState=uploaded', () => {
     const persisted = { state: { projects: [{ id: 'old', sourcePath: '/x', duration: 1, createdAt: 1, status: 'uploaded' }] }, version: 0 };
-    const migrated = useProjects.persist.getOptions().migrate!(persisted.state, 0) as { projects: any[] };
+    const migrated = useProjects.persist.getOptions().migrate!(persisted.state, 0) as { projects: Project[] };
     expect(migrated.projects[0].runState).toBe('uploaded');
   });
 });

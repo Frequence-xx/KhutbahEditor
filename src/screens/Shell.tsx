@@ -81,10 +81,11 @@ export function Shell() {
   };
 
   let rightPane;
-  if (!project) {
-    rightPane = <EmptyState onNew={() => setModalOpen(true)} />;
-  } else if (view === 'settings') {
+  if (view === 'settings') {
+    // Settings is reachable from any state, including when no project exists.
     rightPane = <SettingsPane />;
+  } else if (!project) {
+    rightPane = <EmptyState onNew={() => setModalOpen(true)} />;
   } else if (view === 'upload') {
     rightPane = (
       <UploadPane

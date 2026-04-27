@@ -1,5 +1,7 @@
 import type { Boundary, Bridge, JobKind, ProgressEvent, UploadOpts } from './types';
 import { useProjects } from '../store/projects';
+import { useUi } from '../store/ui';
+import { useToasts } from '../store/toasts';
 
 type InFlight = {
   kind: JobKind;
@@ -35,6 +37,23 @@ export class JobManager {
 
   private static cutDst(sourcePath: string, partKey: 'p1' | 'p2'): string {
     return `${sourcePath}.cut-${partKey}.mp4`;
+  }
+
+  private toast(
+    projectId: string,
+    kind: 'success' | 'error',
+    message: string,
+    alwaysShow = false,
+  ): void {
+    const ui = useUi.getState();
+    const isCurrentlyVisible = ui.selectedProjectId === projectId && ui.view === 'review';
+    if (kind === 'error' || alwaysShow || !isCurrentlyVisible) {
+      useToasts.getState().push({
+        id: `${projectId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        kind,
+        message,
+      });
+    }
   }
 
   startDetect(projectId: string): void {
@@ -83,17 +102,21 @@ export class JobManager {
         if (abort.signal.aborted) return;
         if ('error' in res) {
           useProjects.getState().setError(projectId, res.error, 'detect');
+          this.toast(projectId, 'error', res.error);
           return;
         }
         useProjects.getState().update(projectId, { part1: res.part1, part2: res.part2 });
         useProjects
           .getState()
           .setRunState(projectId, res.overall_confidence < REVIEW_THRESHOLD ? 'needs_review' : 'ready');
+        const basename = project.sourcePath.split('/').pop() ?? project.sourcePath;
+        this.toast(projectId, 'success', `Detection complete: ${basename}`);
       })
       .catch((err: unknown) => {
         if (abort.signal.aborted) return;
         const msg = err instanceof Error ? err.message : String(err);
         useProjects.getState().setError(projectId, msg, 'detect');
+        this.toast(projectId, 'error', msg);
       })
       .finally(() => {
         unsubscribe();
@@ -176,6 +199,7 @@ export class JobManager {
         // the two writes ordered cleanly.
         useProjects.getState().update(projectId, { lastFailedCutPart: partKey });
         useProjects.getState().setError(projectId, msg, 'cut');
+        this.toast(projectId, 'error', msg);
       })
       .finally(() => {
         unsubscribe();
@@ -248,10 +272,12 @@ export class JobManager {
       }
 
       useProjects.getState().setRunState(projectId, 'uploaded');
+      this.toast(projectId, 'success', `Upload complete: ${opts.title}`, /* alwaysShow */ true);
     } catch (err: unknown) {
       if (abort.signal.aborted) return;
       const msg = err instanceof Error ? err.message : String(err);
       useProjects.getState().setError(projectId, msg, 'upload');
+      this.toast(projectId, 'error', msg);
     }
   }
 

@@ -3131,86 +3131,129 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 **Files:**
 - Modify: `src/jobs/JobManager.ts`
 - Test: `tests/renderer/JobManager.toasts.test.ts`
+- Update: `docs/superpowers/plans/2026-04-27-gui-strip-implementation.md`
+
+> **Notes (contract corrections caught during execution).**
+> - `detect.run` mocks must return the full `DetectionResult` shape: `duration`, `part1`, `part2`, `lang_dominant`, `overall_confidence` — `JobManager.startDetect` reads `overall_confidence` to pick `ready` vs `needs_review` and treats a missing field as `< 0.9`.
+> - `upload.video` returns `{ video_id }` (snake_case from the Python sidecar), not `{ videoId }`.
+> - `Bridge` requires `auth: { accessToken(channelId) }`. All test bridges must provide it (even when only `bridge.call` is exercised) or the `Bridge` interface is incomplete.
+> - `startDetect` calls `edit.thumbnails` first (best-effort thumbnail). Test mocks must match-by-method-name and resolve `{ paths: [] }` so the unrelated thumbnail call doesn't throw.
+> - Background-success suppression keys on `selectedProjectId === projectId AND view === 'review'`. Upload-success uses `alwaysShow=true` so it surfaces even on the upload pane.
+> - Sidecar `{ error }` responses are a separate failure path from a thrown promise — also toast them.
 
 - [ ] **Step 1: Write the failing test**
 
 ```ts
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { JobManager } from '../../src/jobs/JobManager';
+import type { Bridge } from '../../src/jobs/types';
 import { useProjects } from '../../src/store/projects';
 import { useToasts } from '../../src/store/toasts';
 import { useUi } from '../../src/store/ui';
 
+const detectOk = {
+  duration: 200,
+  part1: { start: 0, end: 1, confidence: 0.95 },
+  part2: { start: 1, end: 2, confidence: 0.95 },
+  lang_dominant: 'ar',
+  overall_confidence: 0.95,
+};
+
+const makeBridge = (call: Bridge['call']): Bridge => ({
+  call,
+  onProgress: vi.fn(() => () => {}),
+  auth: { accessToken: vi.fn(() => Promise.resolve({ accessToken: 'tok' })) },
+});
+
 describe('JobManager — toast emission', () => {
   beforeEach(() => {
     useProjects.setState({
-      projects: [{ id: 'p1', sourcePath: '/x', duration: 1, createdAt: 1, runState: 'idle' }],
+      projects: [{ id: 'p1', sourcePath: '/x.mp4', duration: 1, createdAt: 1, runState: 'idle' }],
     });
     useToasts.setState({ toasts: [] });
     useUi.setState({ selectedProjectId: null, view: 'review' });
   });
 
   it('on background detection success: pushes a success toast', async () => {
-    const call = vi.fn(() =>
-      Promise.resolve({
-        part1: { start: 0, end: 1, confidence: 0.95 },
-        part2: { start: 1, end: 2, confidence: 0.95 },
-      }),
-    );
-    const jm = new JobManager({ call, onProgress: vi.fn(() => () => {}) });
+    const call = vi.fn((method: string) => {
+      if (method === 'edit.thumbnails') return Promise.resolve({ paths: [] });
+      if (method === 'detect.run') return Promise.resolve(detectOk);
+      return Promise.reject(new Error('unexpected ' + method));
+    });
+    const jm = new JobManager(makeBridge(call as Bridge['call']));
 
     jm.startDetect('p1');
-    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 5));
 
     const toasts = useToasts.getState().toasts;
     expect(toasts.some((t) => t.kind === 'success' && /detection/i.test(t.message))).toBe(true);
   });
 
-  it('on detection success when project IS selected: no toast', async () => {
+  it('on detection success when project IS selected and viewing review: no toast', async () => {
     useUi.setState({ selectedProjectId: 'p1', view: 'review' });
-    const call = vi.fn(() =>
-      Promise.resolve({
-        part1: { start: 0, end: 1, confidence: 0.95 },
-        part2: { start: 1, end: 2, confidence: 0.95 },
-      }),
-    );
-    const jm = new JobManager({ call, onProgress: vi.fn(() => () => {}) });
+    const call = vi.fn((method: string) => {
+      if (method === 'edit.thumbnails') return Promise.resolve({ paths: [] });
+      if (method === 'detect.run') return Promise.resolve(detectOk);
+      return Promise.reject(new Error('unexpected ' + method));
+    });
+    const jm = new JobManager(makeBridge(call as Bridge['call']));
 
     jm.startDetect('p1');
-    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 5));
 
     expect(useToasts.getState().toasts.length).toBe(0);
   });
 
-  it('on any failure: pushes an error toast (selected or not)', async () => {
+  it('on detection failure when project IS selected: still pushes an error toast', async () => {
     useUi.setState({ selectedProjectId: 'p1', view: 'review' });
-    const call = vi.fn(() => Promise.reject(new Error('boom')));
-    const jm = new JobManager({ call, onProgress: vi.fn(() => () => {}) });
+    const call = vi.fn((method: string) => {
+      if (method === 'edit.thumbnails') return Promise.resolve({ paths: [] });
+      if (method === 'detect.run') return Promise.reject(new Error('boom'));
+      return Promise.reject(new Error('unexpected ' + method));
+    });
+    const jm = new JobManager(makeBridge(call as Bridge['call']));
 
     jm.startDetect('p1');
-    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 5));
 
     const toasts = useToasts.getState().toasts;
     expect(toasts.some((t) => t.kind === 'error' && /boom/.test(t.message))).toBe(true);
   });
 
-  it('on upload success: always toasts (selected or not)', async () => {
+  it('on upload success: always toasts even when project IS selected and viewing upload', async () => {
     useUi.setState({ selectedProjectId: 'p1', view: 'upload' });
     useProjects.setState({
       projects: [{
-        id: 'p1', sourcePath: '/x', duration: 1, createdAt: 1, runState: 'ready',
+        id: 'p1', sourcePath: '/x.mp4', duration: 1, createdAt: 1, runState: 'ready',
         part1: { start: 0, end: 1, confidence: 0.95, outputPath: '/p1.mp4' },
         part2: { start: 1, end: 2, confidence: 0.95, outputPath: '/p2.mp4' },
       }],
     });
-    const call = vi.fn().mockResolvedValueOnce({ videoId: 'v1' }).mockResolvedValueOnce({ videoId: 'v2' });
-    const jm = new JobManager({ call, onProgress: vi.fn(() => () => {}) });
+    const call = vi
+      .fn()
+      .mockResolvedValueOnce({ video_id: 'v1' })
+      .mockResolvedValueOnce({ video_id: 'v2' });
+    const jm = new JobManager(makeBridge(call as Bridge['call']));
 
     jm.startUpload('p1', { channelId: 'c', title: 'K' });
-    await new Promise((r) => setTimeout(r, 10));
+    await new Promise((r) => setTimeout(r, 20));
 
     const toasts = useToasts.getState().toasts;
     expect(toasts.some((t) => t.kind === 'success' && /upload/i.test(t.message))).toBe(true);
+  });
+
+  it('on detection sidecar { error } response: pushes an error toast', async () => {
+    const call = vi.fn((method: string) => {
+      if (method === 'edit.thumbnails') return Promise.resolve({ paths: [] });
+      if (method === 'detect.run') return Promise.resolve({ error: 'opening_not_found' });
+      return Promise.reject(new Error('unexpected ' + method));
+    });
+    const jm = new JobManager(makeBridge(call as Bridge['call']));
+
+    jm.startDetect('p1');
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(useToasts.getState().toasts.some((t) => t.kind === 'error' && /opening_not_found/.test(t.message))).toBe(true);
   });
 });
 ```
@@ -3222,13 +3265,25 @@ Expected: FAIL — no toasts emitted.
 
 - [ ] **Step 3: Add toast emission to `JobManager`**
 
-In `src/jobs/JobManager.ts`, add a private helper:
+In `src/jobs/JobManager.ts`, add the imports at the top of the file:
 
 ```ts
-private toast(projectId: string, kind: 'success' | 'error', message: string, alwaysShow = false): void {
+import { useUi } from '../store/ui';
+import { useToasts } from '../store/toasts';
+```
+
+Add a private helper (place it next to `cutDst`):
+
+```ts
+private toast(
+  projectId: string,
+  kind: 'success' | 'error',
+  message: string,
+  alwaysShow = false,
+): void {
   const ui = useUi.getState();
-  const isSelected = ui.selectedProjectId === projectId && ui.view === 'review';
-  if (kind === 'error' || alwaysShow || !isSelected) {
+  const isCurrentlyVisible = ui.selectedProjectId === projectId && ui.view === 'review';
+  if (kind === 'error' || alwaysShow || !isCurrentlyVisible) {
     useToasts.getState().push({
       id: `${projectId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       kind,
@@ -3238,50 +3293,64 @@ private toast(projectId: string, kind: 'success' | 'error', message: string, alw
 }
 ```
 
-Add the imports at the top of the file:
+In `startDetect`'s success branch (after `setRunState` to 'ready'/'needs_review'):
 
 ```ts
-import { useUi } from '../store/ui';
-import { useToasts } from '../store/toasts';
+const basename = project.sourcePath.split('/').pop() ?? project.sourcePath;
+this.toast(projectId, 'success', `Detection complete: ${basename}`);
 ```
 
-In `startDetect` success branch, before transitioning to ready/needs_review:
+In `startDetect`'s `'error' in res` branch (after `setError`):
 
 ```ts
-this.toast(projectId, 'success', `Detection complete for ${project.sourcePath.split('/').pop()}`);
+this.toast(projectId, 'error', res.error);
 ```
 
-In all three method's catch branches:
+In `startDetect`'s and `fireCut`'s catch branches (after `setError`):
 
 ```ts
 this.toast(projectId, 'error', msg);
 ```
 
-In `startUpload` success branch (after setting `runState = 'uploaded'`):
+In `runUpload`'s success branch (after `setRunState(projectId, 'uploaded')`):
 
 ```ts
 this.toast(projectId, 'success', `Upload complete: ${opts.title}`, /* alwaysShow */ true);
 ```
 
+In `runUpload`'s catch branch (after `setError`):
+
+```ts
+this.toast(projectId, 'error', msg);
+```
+
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run tests/renderer/JobManager.toasts.test.ts`
-Expected: PASS — 4 cases green.
+Expected: PASS — 5 cases green.
 
-- [ ] **Step 5: Run the full JobManager + UI suite**
+- [ ] **Step 5: Run the full renderer suite**
 
-Run: `npx vitest run tests/renderer/JobManager*.test.ts tests/renderer/Toaster.test.tsx tests/renderer/ui.test.ts`
-Expected: PASS for all.
+Run: `npx vitest run tests/renderer`
+Expected: 113/113 across 24 files (108 + 5 new).
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/jobs/JobManager.ts tests/renderer/JobManager.toasts.test.ts
+git add src/jobs/JobManager.ts tests/renderer/JobManager.toasts.test.ts \
+  docs/superpowers/plans/2026-04-27-gui-strip-implementation.md
 git commit -m "feat(jobs): JobManager emits toasts on background success + all failures
 
-Background success toasts only fire when the project isn't currently
-selected (so the user notices the work that completed off-screen).
-Errors always toast. Upload success always toasts.
+Background success toasts fire when the user is NOT currently viewing
+the project's review pane (so off-screen completions surface to the
+sidebar). Errors always toast (even when the project is on screen, so
+the failure is visible regardless). Upload success always toasts even
+when the upload pane is visible (the multi-stage uploaded transition is
+worth a noticeable acknowledgement).
+
+Plan corrected: detect.run mocks use full DetectionResult shape
+(overall_confidence + lang_dominant); upload.video returns { video_id }
+snake_case; bridge mocks include the auth namespace.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 ```

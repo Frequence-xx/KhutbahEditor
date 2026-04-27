@@ -2726,54 +2726,77 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 - Create: `src/components/SettingsPane.tsx`
 - Test: `tests/renderer/SettingsPane.test.tsx`
 
-- [ ] **Step 1: Read both files** — settings device picker, output dir, OAuth account list. Lift verbatim into a single component.
+**Contract notes (correcting the original draft):**
+
+- `useSettings` is `{ settings: AppSettings | null, load(), patch() }` — settings are nested, not flat. Read via selector `useSettings((s) => s.settings)`. Mutate via `patch()`, which already calls `window.khutbah.settings.set()` internally and re-stores the result.
+- `YouTubeAccount.channelTitle` (not `name`).
+- There is no `dialog.openDirectory` IPC channel — only `openVideo`/`openAudio`. Output directory is therefore a free-text input; a proper directory dialog would require a new IPC channel and is out of scope for this task.
+
+- [ ] **Step 1: Read both files** — settings device picker, output dir, OAuth account list. Adapt the patterns into a single component (do not lift verbatim — the existing screens use a richer Section/Field/Toggle DSL; the pane keeps only device + output dir + accounts).
 
 - [ ] **Step 2: Write the failing test**
 
 ```tsx
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import { SettingsPane } from '../../src/components/SettingsPane';
 import { useSettings } from '../../src/store/settings';
+
+afterEach(() => {
+  cleanup();
+  useSettings.setState({ settings: null });
+});
 
 describe('SettingsPane', () => {
   beforeEach(() => {
     Object.assign(window, {
       khutbah: {
         auth: {
-          listAccounts: vi.fn(() => Promise.resolve([])),
+          listAccounts: vi.fn(() =>
+            Promise.resolve([{ channelId: 'ch-1', channelTitle: 'Frequence' }]),
+          ),
           signIn: vi.fn(() => Promise.resolve()),
           signOut: vi.fn(() => Promise.resolve()),
         },
         settings: {
           get: vi.fn(() => Promise.resolve({ computeDevice: 'auto', outputDir: '/out' })),
-          set: vi.fn(() => Promise.resolve()),
+          set: vi.fn((patch: object) =>
+            Promise.resolve({ computeDevice: 'auto', outputDir: '/out', ...patch }),
+          ),
         },
-        dialog: { openVideo: vi.fn(), openAudio: vi.fn() },
       },
     });
-    useSettings.setState({ computeDevice: 'auto', outputDir: '/out' });
   });
 
-  it('renders the compute device selector with current value', async () => {
+  it('renders the compute device selector with the loaded value', async () => {
     render(<SettingsPane />);
     const select = await screen.findByLabelText(/compute device/i);
-    expect((select as HTMLSelectElement).value).toBe('auto');
+    await waitFor(() => expect((select as HTMLSelectElement).value).toBe('auto'));
   });
 
-  it('changing the device calls settings.set and updates the store', async () => {
+  it('changing the device calls settings.set with the new value', async () => {
     render(<SettingsPane />);
     const select = await screen.findByLabelText(/compute device/i);
+    await waitFor(() => expect((select as HTMLSelectElement).value).toBe('auto'));
     fireEvent.change(select, { target: { value: 'cuda' } });
-    expect(window.khutbah!.settings.set).toHaveBeenCalledWith({ computeDevice: 'cuda' });
+    await waitFor(() => {
+      expect(window.khutbah!.settings.set).toHaveBeenCalledWith({ computeDevice: 'cuda' });
+    });
   });
 
-  it('clicking Sign in calls auth.signIn', async () => {
+  it('renders YouTube accounts by channelTitle', async () => {
+    render(<SettingsPane />);
+    await screen.findByText(/Frequence/);
+  });
+
+  it('clicking Sign in calls auth.signIn and refreshes the account list', async () => {
     render(<SettingsPane />);
     const btn = await screen.findByRole('button', { name: /sign in/i });
     fireEvent.click(btn);
-    expect(window.khutbah!.auth.signIn).toHaveBeenCalled();
+    await waitFor(() => {
+      expect(window.khutbah!.auth.signIn).toHaveBeenCalled();
+    });
   });
 });
 ```
@@ -2789,27 +2812,21 @@ Expected: FAIL — module not found.
 import { useEffect, useState } from 'react';
 import { useSettings } from '../store/settings';
 
-type Account = { channelId: string; name: string };
+type Account = { channelId: string; channelTitle: string };
 
 export function SettingsPane() {
-  const { computeDevice, outputDir } = useSettings();
+  const settings = useSettings((s) => s.settings);
+  const load = useSettings((s) => s.load);
+  const patch = useSettings((s) => s.patch);
   const [accounts, setAccounts] = useState<Account[]>([]);
 
   useEffect(() => {
-    window.khutbah?.settings.get().then((s) => {
-      useSettings.setState({ computeDevice: s.computeDevice ?? 'auto', outputDir: s.outputDir });
-    });
-    window.khutbah?.auth.listAccounts().then(setAccounts);
-  }, []);
+    void load();
+    void window.khutbah?.auth.listAccounts().then((a) => setAccounts(a as Account[]));
+  }, [load]);
 
-  const setDevice = (d: 'auto' | 'cpu' | 'cuda') => {
-    useSettings.setState({ computeDevice: d });
-    window.khutbah?.settings.set({ computeDevice: d });
-  };
-
-  const setOutDir = (path: string) => {
-    useSettings.setState({ outputDir: path });
-    window.khutbah?.settings.set({ outputDir: path });
+  const refreshAccounts = (): void => {
+    void window.khutbah?.auth.listAccounts().then((a) => setAccounts(a as Account[]));
   };
 
   return (
@@ -2817,11 +2834,15 @@ export function SettingsPane() {
       <h2 className="font-display text-xl text-amber-300">Settings</h2>
 
       <div>
-        <label htmlFor="device" className="text-sm text-slate-300 block mb-1">Compute device</label>
+        <label htmlFor="device" className="text-sm text-slate-300 block mb-1">
+          Compute device
+        </label>
         <select
           id="device"
-          value={computeDevice ?? 'auto'}
-          onChange={(e) => setDevice(e.target.value as 'auto' | 'cpu' | 'cuda')}
+          value={settings?.computeDevice ?? 'auto'}
+          onChange={(e) =>
+            void patch({ computeDevice: e.target.value as 'auto' | 'cpu' | 'cuda' })
+          }
           className="w-full px-3 py-2 bg-slate-900 border border-slate-700 text-slate-100 rounded"
         >
           <option value="auto">Auto</option>
@@ -2831,34 +2852,33 @@ export function SettingsPane() {
       </div>
 
       <div>
-        <label className="text-sm text-slate-300 block mb-1">Output directory</label>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={outputDir ?? ''}
-            readOnly
-            className="flex-1 px-3 py-2 bg-slate-900 border border-slate-700 text-slate-100 rounded"
-          />
-          <button
-            onClick={async () => {
-              const dir = await window.khutbah?.dialog.openVideo();
-              if (dir) setOutDir(dir);
-            }}
-            className="px-3 py-2 bg-slate-700 text-slate-100 rounded"
-          >
-            Browse
-          </button>
-        </div>
+        <label htmlFor="outdir" className="text-sm text-slate-300 block mb-1">
+          Output directory
+        </label>
+        <input
+          id="outdir"
+          type="text"
+          value={settings?.outputDir ?? ''}
+          onChange={(e) => void patch({ outputDir: e.target.value })}
+          placeholder="Path where part1.mp4 / part2.mp4 are written"
+          className="w-full px-3 py-2 bg-slate-900 border border-slate-700 text-slate-100 rounded"
+        />
       </div>
 
       <div>
         <h3 className="text-sm text-slate-300 mb-2">YouTube accounts</h3>
         <ul className="space-y-1">
           {accounts.map((a) => (
-            <li key={a.channelId} className="flex items-center justify-between bg-slate-800 px-3 py-2 rounded">
-              <span className="text-slate-200">{a.name}</span>
+            <li
+              key={a.channelId}
+              className="flex items-center justify-between bg-slate-800 px-3 py-2 rounded"
+            >
+              <span className="text-slate-200">{a.channelTitle}</span>
               <button
-                onClick={() => window.khutbah?.auth.signOut(a.channelId).then(() => window.khutbah?.auth.listAccounts().then(setAccounts))}
+                onClick={async () => {
+                  await window.khutbah?.auth.signOut(a.channelId);
+                  refreshAccounts();
+                }}
                 className="text-xs text-slate-400 hover:text-red-400"
               >
                 Sign out
@@ -2867,7 +2887,10 @@ export function SettingsPane() {
           ))}
         </ul>
         <button
-          onClick={() => window.khutbah?.auth.signIn().then(() => window.khutbah?.auth.listAccounts().then(setAccounts))}
+          onClick={async () => {
+            await window.khutbah?.auth.signIn();
+            refreshAccounts();
+          }}
           className="mt-2 px-3 py-2 bg-amber-400 text-slate-900 rounded font-semibold"
         >
           Sign in
@@ -2881,7 +2904,7 @@ export function SettingsPane() {
 - [ ] **Step 5: Run test to verify it passes**
 
 Run: `npx vitest run tests/renderer/SettingsPane.test.tsx`
-Expected: PASS — 3 cases green.
+Expected: PASS — 4 cases green.
 
 - [ ] **Step 6: Commit**
 
@@ -2889,7 +2912,12 @@ Expected: PASS — 3 cases green.
 git add src/components/SettingsPane.tsx tests/renderer/SettingsPane.test.tsx
 git commit -m "feat(ui): SettingsPane — device, output dir, YouTube accounts
 
-Adapted from Settings.tsx + AccountsSection.tsx into a single pane.
+Adapted from Settings.tsx + AccountsSection.tsx into a single pane with
+the existing useSettings store API (nested settings + patch method).
+
+Plan corrected: useSettings is { settings: AppSettings | null, load,
+patch }, not flat; YouTubeAccount uses channelTitle not name; no
+dialog.openDirectory exists (output dir is free-text).
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 ```

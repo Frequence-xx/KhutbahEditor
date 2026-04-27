@@ -56,6 +56,53 @@ export class JobManager {
     }
   }
 
+  /**
+   * Dual-file path: caller has a separate video + lapel-mic audio.
+   * Chains align (recover offset) → apply_offset_mux (write a single muxed mp4
+   * with the audio time-corrected) → updates the project's sourcePath to the
+   * muxed file → kicks off the regular single-file detect.
+   *
+   * If align or mux fails, the project enters error state with lastFailedKind:
+   * 'detect' so retry reuses the dual-file inputs are NOT re-runnable here —
+   * the caller must invoke startDetectDual again with the same paths.
+   */
+  startDetectDual(projectId: string, videoPath: string, audioPath: string): void {
+    this.cancel(projectId);
+
+    const project = useProjects.getState().projects.find((p) => p.id === projectId);
+    if (!project) return;
+
+    // Failure fields belong to the previous run; the new run shouldn't carry them.
+    useProjects.getState().update(projectId, {
+      lastError: undefined,
+      lastFailedKind: undefined,
+      lastFailedCutPart: undefined,
+    });
+    useProjects.getState().setRunState(projectId, 'detecting');
+
+    const dst = `${videoPath}.muxed.mp4`;
+    void (async () => {
+      try {
+        const align = await this.bridge.call<{ offset_seconds: number; confidence: number }>(
+          'align.dual_file',
+          { video_path: videoPath, audio_path: audioPath },
+        );
+        await this.bridge.call<{ path: string }>('edit.apply_offset_mux', {
+          video_path: videoPath,
+          audio_path: audioPath,
+          offset_seconds: align.offset_seconds,
+          dst,
+        });
+        useProjects.getState().update(projectId, { sourcePath: dst });
+        this.startDetect(projectId);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        useProjects.getState().setError(projectId, msg, 'detect');
+        this.toast(projectId, 'error', msg);
+      }
+    })();
+  }
+
   startDetect(projectId: string): void {
     this.cancel(projectId);
 

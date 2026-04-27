@@ -50,6 +50,16 @@ describe('projects store — runState fields', () => {
     expect(p.progress).toBeUndefined();
   });
 
+  it('setError() with kind sets lastFailedKind alongside the existing fields', () => {
+    useProjects.getState().add(seed({ runState: 'detecting', progress: 50 }));
+    useProjects.getState().setError('p1', 'sidecar crash', 'detect');
+    const p = useProjects.getState().projects[0];
+    expect(p.runState).toBe('error');
+    expect(p.lastError).toBe('sidecar crash');
+    expect(p.lastFailedKind).toBe('detect');
+    expect(p.progress).toBeUndefined();
+  });
+
   it('migration v1: legacy "draft" status maps to runState=idle', () => {
     const persisted = { state: { projects: [{ id: 'old', sourcePath: '/x', duration: 1, createdAt: 1, status: 'draft' }] }, version: 0 };
     const migrated = useProjects.persist.getOptions().migrate!(persisted.state, 0) as { projects: any[] };

@@ -76,7 +76,7 @@ export class JobManager {
       .then((res) => {
         if (abort.signal.aborted) return;
         if ('error' in res) {
-          useProjects.getState().setError(projectId, res.error);
+          useProjects.getState().setError(projectId, res.error, 'detect');
           return;
         }
         useProjects.getState().update(projectId, { part1: res.part1, part2: res.part2 });
@@ -87,7 +87,7 @@ export class JobManager {
       .catch((err: unknown) => {
         if (abort.signal.aborted) return;
         const msg = err instanceof Error ? err.message : String(err);
-        useProjects.getState().setError(projectId, msg);
+        useProjects.getState().setError(projectId, msg, 'detect');
       })
       .finally(() => {
         unsubscribe();
@@ -159,7 +159,11 @@ export class JobManager {
       .catch((err: unknown) => {
         if (abort.signal.aborted) return;
         const msg = err instanceof Error ? err.message : String(err);
-        useProjects.getState().setError(projectId, msg);
+        // Record which part failed BEFORE setError so retry can target it.
+        // setError clears progress in the same write; doing this first keeps
+        // the two writes ordered cleanly.
+        useProjects.getState().update(projectId, { lastFailedCutPart: partKey });
+        useProjects.getState().setError(projectId, msg, 'cut');
       })
       .finally(() => {
         unsubscribe();
@@ -196,6 +200,8 @@ export class JobManager {
       const { accessToken } = await this.bridge.auth.accessToken(opts.channelId);
       if (abort.signal.aborted) return;
 
+      // Persist opts so retry can resume even if Part 1 fails immediately.
+      useProjects.getState().update(projectId, { lastUploadOpts: opts });
       useProjects.getState().setRunState(projectId, 'uploading');
 
       // Part 1 — skip if already uploaded for this channel
@@ -222,7 +228,7 @@ export class JobManager {
     } catch (err: unknown) {
       if (abort.signal.aborted) return;
       const msg = err instanceof Error ? err.message : String(err);
-      useProjects.getState().setError(projectId, msg);
+      useProjects.getState().setError(projectId, msg, 'upload');
     }
   }
 
@@ -297,8 +303,25 @@ export class JobManager {
     const uploads = { ...(part.uploads ?? {}), [channelId]: result };
     useProjects.getState().update(projectId, { [partKey]: { ...part, uploads } });
   }
-  retry(_projectId: string): void {
-    throw new Error('not implemented');
+  retry(projectId: string): void {
+    const project = useProjects.getState().projects.find((p) => p.id === projectId);
+    if (!project?.lastFailedKind) return;
+
+    switch (project.lastFailedKind) {
+      case 'detect':
+        this.startDetect(projectId);
+        return;
+      case 'cut':
+        if (project.lastFailedCutPart) {
+          this.fireCut(projectId, project.lastFailedCutPart);
+        }
+        return;
+      case 'upload':
+        if (project.lastUploadOpts) {
+          this.startUpload(projectId, project.lastUploadOpts);
+        }
+        return;
+    }
   }
   cancel(projectId: string): void {
     const t = this.debounceTimers.get(projectId);

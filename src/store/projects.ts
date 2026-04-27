@@ -27,6 +27,16 @@ export type Part = {
   videoId?: string;
 };
 
+// Duplicated from src/jobs/types.ts to avoid a circular import (the JobManager
+// imports the store; if the store imported from jobs/types.ts the dependency
+// graph would close on itself). Shape MUST match UploadOpts there exactly.
+export type LastUploadOpts = {
+  channelId: string;
+  playlistId?: string;
+  title: string;
+  thumbnailPath?: string;
+};
+
 export type Project = {
   id: string;
   sourcePath: string;
@@ -37,6 +47,9 @@ export type Project = {
   runState: RunState;
   progress?: number;
   lastError?: string;
+  lastFailedKind?: 'detect' | 'cut' | 'upload';
+  lastFailedCutPart?: 'p1' | 'p2';
+  lastUploadOpts?: LastUploadOpts;
   thumbnailPath?: string;
   part1?: Part;
   part2?: Part;
@@ -49,7 +62,7 @@ type State = {
   remove: (id: string) => void;
   setRunState: (id: string, runState: RunState) => void;
   setProgress: (id: string, progress: number) => void;
-  setError: (id: string, message: string) => void;
+  setError: (id: string, message: string, kind?: 'detect' | 'cut' | 'upload') => void;
 };
 
 const STATUS_TO_RUN_STATE: Record<string, RunState> = {
@@ -77,11 +90,17 @@ export const useProjects = create<State>()(
         set((s) => ({
           projects: s.projects.map((p) => (p.id === id ? { ...p, progress } : p)),
         })),
-      setError: (id, message) =>
+      setError: (id, message, kind) =>
         set((s) => ({
           projects: s.projects.map((p) =>
             p.id === id
-              ? { ...p, runState: 'error' as const, lastError: message, progress: undefined }
+              ? {
+                  ...p,
+                  runState: 'error' as const,
+                  lastError: message,
+                  lastFailedKind: kind,
+                  progress: undefined,
+                }
               : p,
           ),
         })),

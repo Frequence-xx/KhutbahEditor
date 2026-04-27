@@ -1488,17 +1488,54 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 ### Task 7: `JobManager.retry` — resume from last failed kind
 
 **Files:**
-- Modify: `src/jobs/JobManager.ts` and `src/store/projects.ts`
+- Modify: `src/jobs/JobManager.ts`, `src/store/projects.ts`, `tests/renderer/projects.runState.test.ts`
 - Test: `tests/renderer/JobManager.retry.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+**Contract notes (corrections vs the original draft):**
 
-Create `tests/renderer/JobManager.retry.test.ts`:
+- **`detect.run` mock shape** — the real RPC returns a full `DetectionResult` (`{ duration, part1, part2, lang_dominant, overall_confidence }`). The retry test must mock that full shape, not just `{ part1, part2 }`, so the success branch of `startDetect` doesn't crash on the missing `overall_confidence` it threshold-compares against.
+- **`upload.video` response shape** — snake_case `{ video_id }`, not `{ videoId }`. The actual `uploadPart` reads `res.video_id`.
+- **Bridge `auth` namespace** — `Bridge` requires `auth.accessToken(channelId): Promise<{accessToken: string}>`. All mock bridges in the retry test must include it (even when not exercised) to satisfy the type.
+- **`fireCut` signature** — `fireCut(projectId, partKey: 'p1' | 'p2')`, not `fireCut(projectId)`. So retry needs to know **which** part to re-cut.
+- **New Project field: `lastFailedCutPart`** — stored alongside `lastFailedKind` on cut errors so retry can target the correct part. Kept as a separate field rather than encoding `'cut-p1'|'cut-p2'` into the kind union — keeps the kind union short and lets the cut path read its own state.
+
+- [ ] **Step 1: Write the failing tests**
+
+First, extend `tests/renderer/projects.runState.test.ts` with a test for the new `kind` parameter:
+
+```ts
+it('setError() with kind sets lastFailedKind alongside the existing fields', () => {
+  useProjects.getState().add(seed({ runState: 'detecting', progress: 50 }));
+  useProjects.getState().setError('p1', 'sidecar crash', 'detect');
+  const p = useProjects.getState().projects[0];
+  expect(p.runState).toBe('error');
+  expect(p.lastError).toBe('sidecar crash');
+  expect(p.lastFailedKind).toBe('detect');
+  expect(p.progress).toBeUndefined();
+});
+```
+
+Then create `tests/renderer/JobManager.retry.test.ts`:
 
 ```ts
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { JobManager } from '../../src/jobs/JobManager';
+import type { Bridge } from '../../src/jobs/types';
 import { useProjects } from '../../src/store/projects';
+
+const detectOk = {
+  duration: 200,
+  part1: { start: 0, end: 1, confidence: 0.95 },
+  part2: { start: 1, end: 2, confidence: 0.95 },
+  lang_dominant: 'ar',
+  overall_confidence: 0.95,
+};
+
+const makeBridge = (call: Bridge['call']): Bridge => ({
+  call,
+  onProgress: vi.fn(() => () => {}),
+  auth: { accessToken: vi.fn(() => Promise.resolve({ accessToken: 'tok' })) },
+});
 
 describe('JobManager.retry', () => {
   beforeEach(() => {
@@ -1508,74 +1545,110 @@ describe('JobManager.retry', () => {
   it('after failed detect: retry calls detect.run again', async () => {
     useProjects.setState({
       projects: [{
-        id: 'p1', sourcePath: '/x', duration: 1, createdAt: 1,
+        id: 'p1', sourcePath: '/x.mp4', duration: 1, createdAt: 1,
         runState: 'error', lastError: 'crash', lastFailedKind: 'detect',
       }],
     });
-    const call = vi.fn(() => Promise.resolve({
-      part1: { start: 0, end: 1, confidence: 0.95 },
-      part2: { start: 1, end: 2, confidence: 0.95 },
-    }));
-    const jm = new JobManager({ call, onProgress: vi.fn(() => () => {}) });
+    const call = vi.fn((method: string) => {
+      if (method === 'edit.thumbnails') return Promise.resolve({ paths: [] });
+      if (method === 'detect.run') return Promise.resolve(detectOk);
+      return Promise.reject(new Error('unexpected ' + method));
+    });
+    const jm = new JobManager(makeBridge(call as Bridge['call']));
 
     jm.retry('p1');
-    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 5));
 
-    expect(call).toHaveBeenCalledWith('detect.run', expect.anything());
+    expect(call).toHaveBeenCalledWith('detect.run', expect.objectContaining({ audio_path: '/x.mp4' }));
   });
 
-  it('after failed upload: retry calls upload.video again', async () => {
+  it('after failed cut: retry calls edit.smart_cut for the failed part only', async () => {
     useProjects.setState({
       projects: [{
-        id: 'p1', sourcePath: '/x', duration: 1, createdAt: 1,
-        runState: 'error', lastError: 'net', lastFailedKind: 'upload',
-        lastUploadOpts: { channelId: 'c1', title: 'K' },
-        part1: { start: 0, end: 1, confidence: 0.95, outputPath: '/p1.mp4' },
-        part2: { start: 1, end: 2, confidence: 0.95, outputPath: '/p2.mp4' },
+        id: 'p1', sourcePath: '/x.mp4', duration: 200, createdAt: 1,
+        runState: 'error', lastError: 'ffmpeg fail',
+        lastFailedKind: 'cut', lastFailedCutPart: 'p2',
+        part1: { start: 0, end: 100, confidence: 0.95, outputPath: '/x.mp4.cut-p1.mp4' },
+        part2: { start: 110, end: 195, confidence: 0.95, outputPath: '/x.mp4.cut-p2.mp4' },
       }],
     });
-    const call = vi.fn(() => Promise.resolve({ videoId: 'v1' }));
-    const jm = new JobManager({ call, onProgress: vi.fn(() => () => {}) });
+    const call = vi.fn(() => new Promise(() => {}));
+    const jm = new JobManager(makeBridge(call as Bridge['call']));
 
     jm.retry('p1');
     await new Promise((r) => setTimeout(r, 0));
 
-    expect(call).toHaveBeenCalledWith('upload.video', expect.anything());
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(call).toHaveBeenCalledWith('edit.smart_cut', expect.objectContaining({
+      src: '/x.mp4', dst: '/x.mp4.cut-p2.mp4', start: 110, end: 195,
+    }));
   });
 
-  it('without lastFailedKind: noop', () => {
+  it('after failed upload: retry calls upload.video again with stored opts', async () => {
     useProjects.setState({
-      projects: [{ id: 'p1', sourcePath: '/x', duration: 1, createdAt: 1, runState: 'error', lastError: '?' }],
+      projects: [{
+        id: 'p1', sourcePath: '/x.mp4', duration: 200, createdAt: 1,
+        runState: 'error', lastError: 'net',
+        lastFailedKind: 'upload',
+        lastUploadOpts: { channelId: 'c1', title: 'K' },
+        part1: { start: 0, end: 100, confidence: 0.95, outputPath: '/x.mp4.cut-p1.mp4' },
+        part2: { start: 110, end: 195, confidence: 0.95, outputPath: '/x.mp4.cut-p2.mp4' },
+      }],
     });
-    const call = vi.fn();
-    const jm = new JobManager({ call, onProgress: vi.fn(() => () => {}) });
+    const call = vi.fn(() => Promise.resolve({ video_id: 'v1' }));
+    const jm = new JobManager(makeBridge(call as Bridge['call']));
+
     jm.retry('p1');
-    expect(call).not.toHaveBeenCalled();
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(call).toHaveBeenCalledWith('upload.video', expect.objectContaining({
+      access_token: 'tok',
+      file_path: '/x.mp4.cut-p1.mp4',
+      title: 'K — Part 1',
+    }));
   });
+
+  it('without lastFailedKind: noop', () => { /* ... */ });
+  it('cut retry without lastFailedCutPart: noop', () => { /* ... */ });
+  it('upload retry without lastUploadOpts: noop', () => { /* ... */ });
+  it('does nothing for unknown projectId', () => { /* ... */ });
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Run tests to verify they fail**
 
-Run: `npx vitest run tests/renderer/JobManager.retry.test.ts`
-Expected: FAIL — `retry` throws; `lastFailedKind` / `lastUploadOpts` not on Project.
+Run: `npx vitest run tests/renderer/JobManager.retry.test.ts tests/renderer/projects.runState.test.ts`
+Expected: FAIL — `retry` throws "not implemented"; `lastFailedKind` field absent.
 
-- [ ] **Step 3: Add fields to `Project` and write helpers**
+- [ ] **Step 3: Add fields to `Project` and extend `setError`**
 
-In `src/store/projects.ts`, extend the `Project` type:
+In `src/store/projects.ts`, extend the `Project` type with three new optional fields:
 
 ```ts
+// Duplicated from src/jobs/types.ts to avoid a circular import.
+// Shape MUST match UploadOpts there exactly.
+export type LastUploadOpts = {
+  channelId: string;
+  playlistId?: string;
+  title: string;
+  thumbnailPath?: string;
+};
+
 export type Project = {
   // ... existing fields ...
   lastFailedKind?: 'detect' | 'cut' | 'upload';
-  lastUploadOpts?: { channelId: string; title: string; playlistId?: string; thumbnailPath?: string };
+  lastFailedCutPart?: 'p1' | 'p2';
+  lastUploadOpts?: LastUploadOpts;
 };
 ```
 
-Update `setError` to accept an optional `kind`:
+Update the `State` type and `setError` implementation to accept an optional `kind`:
 
 ```ts
-setError: (id, message, kind?) =>
+setError: (id: string, message: string, kind?: 'detect' | 'cut' | 'upload') => void;
+
+// implementation:
+setError: (id, message, kind) =>
   set((s) => ({
     projects: s.projects.map((p) =>
       p.id === id
@@ -1585,19 +1658,35 @@ setError: (id, message, kind?) =>
   })),
 ```
 
-And update its type in `State`:
+Now wire the kind into all four existing `setError` callsites in `src/jobs/JobManager.ts`:
+
+- `startDetect`'s `'error' in res` branch → `setError(projectId, res.error, 'detect')`
+- `startDetect`'s `.catch` → `setError(projectId, msg, 'detect')`
+- `fireCut`'s `.catch` → write `lastFailedCutPart` BEFORE setError, then `setError(projectId, msg, 'cut')`
+- `runUpload`'s `try/catch` → `setError(projectId, msg, 'upload')`
+
+For the cut path, persist `lastFailedCutPart` via `update()` BEFORE `setError` (setError clears progress in the same write; doing the part-key write first keeps the two writes ordered cleanly):
 
 ```ts
-setError: (id: string, message: string, kind?: 'detect' | 'cut' | 'upload') => void;
+.catch((err: unknown) => {
+  if (abort.signal.aborted) return;
+  const msg = err instanceof Error ? err.message : String(err);
+  useProjects.getState().update(projectId, { lastFailedCutPart: partKey });
+  useProjects.getState().setError(projectId, msg, 'cut');
+})
 ```
 
-Update `JobManager`'s three `start*` methods to call `setError(projectId, msg, '<kind>')` with their kind. (Search-and-replace `setError(projectId, msg)` to include the kind.)
-
-Update `JobManager.startUpload` to also persist `opts` for retry resume:
+For the upload path, persist `lastUploadOpts` BEFORE the first upload call (immediately after auth resolves and the abort check) so retry can replay even if Part 1 fails on its first request:
 
 ```ts
-useProjects.getState().update(projectId, { lastUploadOpts: opts });
-useProjects.getState().setRunState(projectId, 'uploading');
+try {
+  const { accessToken } = await this.bridge.auth.accessToken(opts.channelId);
+  if (abort.signal.aborted) return;
+
+  // Persist opts so retry can resume even if Part 1 fails immediately.
+  useProjects.getState().update(projectId, { lastUploadOpts: opts });
+  useProjects.getState().setRunState(projectId, 'uploading');
+  // ... rest unchanged ...
 ```
 
 - [ ] **Step 4: Implement `retry` in `JobManager`**
@@ -1606,35 +1695,61 @@ useProjects.getState().setRunState(projectId, 'uploading');
 retry(projectId: string): void {
   const project = useProjects.getState().projects.find((p) => p.id === projectId);
   if (!project?.lastFailedKind) return;
+
   switch (project.lastFailedKind) {
     case 'detect':
       this.startDetect(projectId);
-      break;
+      return;
     case 'cut':
-      // Re-fire from current boundary state — no debounce.
-      this.fireCut(projectId);
-      break;
+      if (project.lastFailedCutPart) {
+        this.fireCut(projectId, project.lastFailedCutPart);
+      }
+      return;
     case 'upload':
-      if (project.lastUploadOpts) this.startUpload(projectId, project.lastUploadOpts);
-      break;
+      if (project.lastUploadOpts) {
+        this.startUpload(projectId, project.lastUploadOpts);
+      }
+      return;
   }
 }
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+Note that `fireCut` is private — since `retry` is a method on the same class, it can call it directly without exposing it.
 
-Run: `npx vitest run tests/renderer/JobManager.retry.test.ts tests/renderer/JobManager.startDetect.test.ts tests/renderer/JobManager.startUpload.test.ts tests/renderer/projects.runState.test.ts`
-Expected: PASS — all four files green.
+- [ ] **Step 5: Run tests to verify they pass**
+
+Run:
+```bash
+npx vitest run tests/renderer/JobManager.retry.test.ts \
+  tests/renderer/JobManager.startDetect.test.ts \
+  tests/renderer/JobManager.startCut.test.ts \
+  tests/renderer/JobManager.startUpload.test.ts \
+  tests/renderer/projects.runState.test.ts
+```
+Expected: PASS — all five files green, no regressions.
+
+Then run the full renderer suite:
+```bash
+npx vitest run tests/renderer
+```
+Expected: 73 passed (65 baseline + 7 retry + 1 new in projects.runState).
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/jobs/JobManager.ts src/store/projects.ts tests/renderer/JobManager.retry.test.ts
+git add src/jobs/JobManager.ts src/store/projects.ts \
+  tests/renderer/JobManager.retry.test.ts \
+  tests/renderer/projects.runState.test.ts
 git commit -m "feat(jobs): JobManager.retry resumes from lastFailedKind
 
-Stores lastFailedKind on Project when a job errors, plus lastUploadOpts
-when an upload begins, so Retry can call back into the right method
-with the original arguments.
+Stores lastFailedKind on Project when a job errors (detect/cut/upload),
+plus lastFailedCutPart for cut errors so retry can target the right
+part, and lastUploadOpts for upload errors so retry can replay the
+original opts. retry(projectId) switches on lastFailedKind and dispatches
+to startDetect / fireCut(partKey) / startUpload(opts) accordingly.
+
+Adds an optional kind parameter to projects store's setError so
+JobManager can persist the lastFailedKind atomically with the error.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 ```

@@ -899,6 +899,12 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 - Modify: `src/jobs/JobManager.ts`
 - Test: `tests/renderer/JobManager.startCut.test.ts`
 
+**Contract notes (corrected from earlier draft):**
+- `edit.smart_cut` takes one part at a time per spec §66 — `p1Start`/`p1End` re-cut Part 1; `p2Start`/`p2End` re-cut Part 2. The other part is left untouched.
+- The IPC contract is `{ src, dst, start, end }` → `{ output: dst }` (matches `src/lib/autopilot.ts:116-127` and the original `Editor.tsx:461-481`). Audio loudness defaults match the locked design (-14 LUFS / -1 dBTP / 11 LU); no need to override.
+- The `dst` path is derived deterministically as `${sourcePath}.cut-p1.mp4` / `${sourcePath}.cut-p2.mp4`, mirroring the `.thumbs` sibling pattern from Task 4b. The sidecar overwrites in place via `ffmpeg -y`.
+- The boundary mutation is applied **eagerly** in `startCut` (before debounce fires) so the UI sees the new boundary immediately. This is also how successive nudges accumulate — each click mutates the store, so by the time the cut fires the cumulative value is in the store.
+
 - [ ] **Step 1: Write the failing test**
 
 Create `tests/renderer/JobManager.startCut.test.ts`:
@@ -918,11 +924,16 @@ const seed = () =>
         duration: 200,
         createdAt: 1,
         runState: 'ready',
-        part1: { start: 10, end: 100, confidence: 0.95 },
-        part2: { start: 110, end: 195, confidence: 0.92 },
+        part1: { start: 10, end: 100, confidence: 0.95, outputPath: '/tmp/src.mp4.cut-p1.mp4' },
+        part2: { start: 110, end: 195, confidence: 0.92, outputPath: '/tmp/src.mp4.cut-p2.mp4' },
       },
     ],
   });
+
+const makeBridge = (call: Bridge['call']): Bridge => ({
+  call,
+  onProgress: vi.fn(() => () => {}),
+});
 
 describe('JobManager.startCut', () => {
   beforeEach(() => {
@@ -933,9 +944,9 @@ describe('JobManager.startCut', () => {
     vi.useRealTimers();
   });
 
-  it('debounces rapid clicks, only one cut fires after settle', () => {
+  it('debounces rapid clicks — only one cut fires after 250ms settle', () => {
     const call = vi.fn(() => new Promise(() => {}));
-    const jm = new JobManager({ call, onProgress: vi.fn(() => () => {}) });
+    const jm = new JobManager(makeBridge(call as Bridge['call']));
 
     jm.startCut('p1', 'p1Start', +5);
     jm.startCut('p1', 'p1Start', +5);
@@ -948,23 +959,67 @@ describe('JobManager.startCut', () => {
     expect(call).toHaveBeenCalledTimes(1);
   });
 
-  it('passes the new boundary value (start + delta) to edit.smart_cut', () => {
+  it('boundary mutations accumulate across rapid clicks before the cut fires', () => {
     const call = vi.fn(() => new Promise(() => {}));
-    const jm = new JobManager({ call, onProgress: vi.fn(() => () => {}) });
+    const jm = new JobManager(makeBridge(call as Bridge['call']));
+
+    jm.startCut('p1', 'p1Start', +5);
+    jm.startCut('p1', 'p1Start', +5);
+    jm.startCut('p1', 'p1Start', +5);
+    vi.advanceTimersByTime(260);
+
+    expect(call).toHaveBeenCalledWith(
+      'edit.smart_cut',
+      expect.objectContaining({
+        src: '/tmp/src.mp4',
+        dst: '/tmp/src.mp4.cut-p1.mp4',
+        start: 25,
+        end: 100,
+      }),
+    );
+  });
+
+  it('p1Start +5 cuts Part 1 only, leaves Part 2 untouched', () => {
+    const call = vi.fn(() => new Promise(() => {}));
+    const jm = new JobManager(makeBridge(call as Bridge['call']));
 
     jm.startCut('p1', 'p1Start', +5);
     vi.advanceTimersByTime(260);
 
-    expect(call).toHaveBeenCalledWith('edit.smart_cut', expect.objectContaining({
-      projectId: 'p1',
-      part1: expect.objectContaining({ start: 15, end: 100 }),
-      part2: expect.objectContaining({ start: 110, end: 195 }),
-    }));
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(call).toHaveBeenCalledWith(
+      'edit.smart_cut',
+      expect.objectContaining({
+        src: '/tmp/src.mp4',
+        dst: '/tmp/src.mp4.cut-p1.mp4',
+        start: 15,
+        end: 100,
+      }),
+    );
+  });
+
+  it('p2End -3 cuts Part 2 only, leaves Part 1 untouched', () => {
+    const call = vi.fn(() => new Promise(() => {}));
+    const jm = new JobManager(makeBridge(call as Bridge['call']));
+
+    jm.startCut('p1', 'p2End', -3);
+    vi.advanceTimersByTime(260);
+
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(call).toHaveBeenCalledWith(
+      'edit.smart_cut',
+      expect.objectContaining({
+        src: '/tmp/src.mp4',
+        dst: '/tmp/src.mp4.cut-p2.mp4',
+        start: 110,
+        end: 192,
+      }),
+    );
   });
 
   it('updates runState to cutting while in flight', () => {
     const call = vi.fn(() => new Promise(() => {}));
-    const jm = new JobManager({ call, onProgress: vi.fn(() => () => {}) });
+    const jm = new JobManager(makeBridge(call as Bridge['call']));
 
     jm.startCut('p1', 'p2End', -3);
     vi.advanceTimersByTime(260);
@@ -972,14 +1027,14 @@ describe('JobManager.startCut', () => {
     expect(useProjects.getState().projects[0].runState).toBe('cutting');
   });
 
-  it('on success applies the new boundary to the project and returns to ready', async () => {
+  it('on success applies new boundary + outputPath; returns to ready; other part unchanged', async () => {
     let resolve!: (v: unknown) => void;
     const call = vi.fn(() => new Promise((r) => { resolve = r; }));
-    const jm = new JobManager({ call, onProgress: vi.fn(() => () => {}) });
+    const jm = new JobManager(makeBridge(call as Bridge['call']));
 
     jm.startCut('p1', 'p2End', -3);
     vi.advanceTimersByTime(260);
-    resolve({ part1Path: '/out/part1.mp4', part2Path: '/out/part2.mp4' });
+    resolve({ output: '/tmp/src.mp4.cut-p2.mp4' });
 
     await vi.waitFor(() => {
       expect(useProjects.getState().projects[0].runState).toBe('ready');
@@ -987,8 +1042,34 @@ describe('JobManager.startCut', () => {
 
     const p = useProjects.getState().projects[0];
     expect(p.part2?.end).toBe(192);
-    expect(p.part2?.outputPath).toBe('/out/part2.mp4');
-    expect(p.part1?.outputPath).toBe('/out/part1.mp4');
+    expect(p.part2?.outputPath).toBe('/tmp/src.mp4.cut-p2.mp4');
+    // Part 1 untouched
+    expect(p.part1?.start).toBe(10);
+    expect(p.part1?.end).toBe(100);
+    expect(p.part1?.outputPath).toBe('/tmp/src.mp4.cut-p1.mp4');
+  });
+
+  it('on rejection: setError with message; runState=error', async () => {
+    const call = vi.fn(() => Promise.reject(new Error('ffmpeg crashed')));
+    const jm = new JobManager(makeBridge(call as Bridge['call']));
+
+    jm.startCut('p1', 'p1Start', +5);
+    vi.advanceTimersByTime(260);
+
+    await vi.waitFor(() => {
+      expect(useProjects.getState().projects[0].runState).toBe('error');
+    });
+    expect(useProjects.getState().projects[0].lastError).toBe('ffmpeg crashed');
+  });
+
+  it('does nothing for unknown projectId', () => {
+    const call = vi.fn();
+    const jm = new JobManager(makeBridge(call as Bridge['call']));
+
+    jm.startCut('does-not-exist', 'p1Start', +5);
+    vi.advanceTimersByTime(260);
+
+    expect(call).not.toHaveBeenCalled();
   });
 });
 ```
@@ -1000,63 +1081,79 @@ Expected: FAIL — `startCut` throws `not implemented`.
 
 - [ ] **Step 3: Implement `startCut` in `src/jobs/JobManager.ts`**
 
-Add a private debounce map and replace the `startCut` body:
+Add private fields above the constructor and a static helper for the derived `dst` path:
 
 ```ts
-// Add to class fields:
 private debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 private static readonly NUDGE_DEBOUNCE_MS = 250;
 
-startCut(projectId: string, boundary: Boundary, deltaSec: number): void {
-  const existing = this.debounceTimers.get(projectId);
-  if (existing) clearTimeout(existing);
+private static cutDst(sourcePath: string, partKey: 'p1' | 'p2'): string {
+  return `${sourcePath}.cut-${partKey}.mp4`;
+}
+```
 
+Replace the `startCut` body and add the private `fireCut` method:
+
+```ts
+startCut(projectId: string, boundary: Boundary, deltaSec: number): void {
   const project = useProjects.getState().projects.find((p) => p.id === projectId);
   if (!project) return;
 
-  // Apply pending boundary mutation eagerly so successive nudges accumulate.
-  const part1 = { ...(project.part1 ?? { start: 0, end: 0 }) };
-  const part2 = { ...(project.part2 ?? { start: 0, end: 0 }) };
-  if (boundary === 'p1Start') part1.start += deltaSec;
-  if (boundary === 'p1End') part1.end += deltaSec;
-  if (boundary === 'p2Start') part2.start += deltaSec;
-  if (boundary === 'p2End') part2.end += deltaSec;
+  // Apply the boundary mutation eagerly so successive nudges accumulate
+  // even before the debounce fires.
+  const part1 = project.part1 ? { ...project.part1 } : undefined;
+  const part2 = project.part2 ? { ...project.part2 } : undefined;
+  if (part1 && boundary === 'p1Start') part1.start += deltaSec;
+  if (part1 && boundary === 'p1End') part1.end += deltaSec;
+  if (part2 && boundary === 'p2Start') part2.start += deltaSec;
+  if (part2 && boundary === 'p2End') part2.end += deltaSec;
   useProjects.getState().update(projectId, { part1, part2 });
 
+  // Reset debounce.
+  const existing = this.debounceTimers.get(projectId);
+  if (existing) clearTimeout(existing);
+
+  const partKey: 'p1' | 'p2' = boundary === 'p1Start' || boundary === 'p1End' ? 'p1' : 'p2';
   const timer = setTimeout(() => {
     this.debounceTimers.delete(projectId);
-    this.fireCut(projectId);
+    this.fireCut(projectId, partKey);
   }, JobManager.NUDGE_DEBOUNCE_MS);
   this.debounceTimers.set(projectId, timer);
 }
 
-private fireCut(projectId: string): void {
+private fireCut(projectId: string, partKey: 'p1' | 'p2'): void {
   this.cancel(projectId);
+
+  const project = useProjects.getState().projects.find((p) => p.id === projectId);
+  if (!project) return;
+
+  const part = partKey === 'p1' ? project.part1 : project.part2;
+  if (!part) return;
+
   const abort = new AbortController();
-  const unsubscribe = this.bridge.onProgress((ev) => {
+  const unsubscribe = this.bridge.onProgress((ev: ProgressEvent) => {
     if (ev.projectId === projectId) {
       useProjects.getState().setProgress(projectId, ev.pct);
     }
   });
   this.inFlight.set(projectId, { kind: 'cut', abort, unsubscribe });
 
-  const project = useProjects.getState().projects.find((p) => p.id === projectId);
-  if (!project) return;
   useProjects.getState().setRunState(projectId, 'cutting');
 
+  const dst = JobManager.cutDst(project.sourcePath, partKey);
   this.bridge
-    .call<{ part1Path: string; part2Path: string }>('edit.smart_cut', {
-      projectId,
-      sourcePath: project.sourcePath,
-      part1: project.part1,
-      part2: project.part2,
+    .call<{ output: string }>('edit.smart_cut', {
+      src: project.sourcePath,
+      dst,
+      start: part.start,
+      end: part.end,
     })
     .then((res) => {
       if (abort.signal.aborted) return;
-      useProjects.getState().update(projectId, {
-        part1: project.part1 ? { ...project.part1, outputPath: res.part1Path } : undefined,
-        part2: project.part2 ? { ...project.part2, outputPath: res.part2Path } : undefined,
-      });
+      const updated = { ...part, outputPath: res.output };
+      useProjects
+        .getState()
+        .update(projectId, partKey === 'p1' ? { part1: updated } : { part2: updated });
       useProjects.getState().setRunState(projectId, 'ready');
     })
     .catch((err: unknown) => {
@@ -1071,20 +1168,28 @@ private fireCut(projectId: string): void {
 }
 ```
 
+Notes on the implementation:
+- `cancel(projectId)` at the top of `fireCut` is re-entry protection — if a previous cut was actually firing when a new debounce settles, abort it before starting the new one. (Different from debounce, which only buckets repeated NUDGE clicks before any cut fires.)
+- `partKey` is derived once at debounce time and threaded into `fireCut` — even if the user nudges a different boundary during the in-flight cut, the just-fired cut still finishes with the boundaries set at debounce time.
+- `if (!part) return;` guards the rare case where part1/part2 has been removed between debounce and fire.
+
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run tests/renderer/JobManager.startCut.test.ts`
-Expected: PASS — 4 cases green.
+Expected: PASS — 8 cases green.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/jobs/JobManager.ts tests/renderer/JobManager.startCut.test.ts
-git commit -m "feat(jobs): JobManager.startCut with 250ms debounce + boundary mutation
+git add src/jobs/JobManager.ts tests/renderer/JobManager.startCut.test.ts docs/superpowers/plans/2026-04-27-gui-strip-implementation.md
+git commit -m "feat(jobs): JobManager.startCut with 250ms debounce + single-part recut
 
-Successive nudges on the same project accumulate boundary deltas and
-debounce — only one edit.smart_cut RPC fires per click burst. runState
-flips to cutting while in flight, returns to ready on success.
+Per spec §66, each nudge calls edit.smart_cut for the affected part only
+(p1Start/p1End → Part 1; p2Start/p2End → Part 2). The dst path is
+derived deterministically as \${sourcePath}.cut-p1.mp4 / .cut-p2.mp4 so
+the sidecar overwrites in place via ffmpeg -y. The boundary mutation is
+applied eagerly so the UI sees the new value immediately; the actual
+re-cut fires after a 250ms debounce settle.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 ```

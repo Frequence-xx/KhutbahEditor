@@ -164,4 +164,15 @@ describe('JobManager.startCut', () => {
 
     expect(call).not.toHaveBeenCalled();
   });
+
+  it('cancel(projectId) clears the debounce timer — pending nudge does not ghost-fire', () => {
+    const call = vi.fn();
+    const jm = new JobManager(makeBridge(call as Bridge['call']));
+
+    jm.startCut('p1', 'p1Start', +5);
+    jm.cancel('p1');
+    vi.advanceTimersByTime(500);
+
+    expect(call).not.toHaveBeenCalled();
+  });
 });

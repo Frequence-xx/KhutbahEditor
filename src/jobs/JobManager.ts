@@ -173,6 +173,11 @@ export class JobManager {
     throw new Error('not implemented');
   }
   cancel(projectId: string): void {
+    const t = this.debounceTimers.get(projectId);
+    if (t) {
+      clearTimeout(t);
+      this.debounceTimers.delete(projectId);
+    }
     const job = this.inFlight.get(projectId);
     if (job) {
       job.abort.abort();

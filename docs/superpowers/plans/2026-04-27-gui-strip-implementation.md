@@ -1071,6 +1071,17 @@ describe('JobManager.startCut', () => {
 
     expect(call).not.toHaveBeenCalled();
   });
+
+  it('cancel(projectId) clears the debounce timer — pending nudge does not ghost-fire', () => {
+    const call = vi.fn();
+    const jm = new JobManager(makeBridge(call as Bridge['call']));
+
+    jm.startCut('p1', 'p1Start', +5);
+    jm.cancel('p1');
+    vi.advanceTimersByTime(500);
+
+    expect(call).not.toHaveBeenCalled();
+  });
 });
 ```
 
@@ -1165,6 +1176,24 @@ private fireCut(projectId: string, partKey: 'p1' | 'p2'): void {
       unsubscribe();
       if (this.inFlight.get(projectId)?.abort === abort) this.inFlight.delete(projectId);
     });
+}
+```
+
+Update `cancel(projectId)` so a cancel during the debounce window also clears the pending timer (otherwise a "cancelled" nudge would ghost-fire ~250 ms later — Task 7's `retry` is the first caller that actually triggers this path):
+
+```ts
+cancel(projectId: string): void {
+  const t = this.debounceTimers.get(projectId);
+  if (t) {
+    clearTimeout(t);
+    this.debounceTimers.delete(projectId);
+  }
+  const job = this.inFlight.get(projectId);
+  if (job) {
+    job.abort.abort();
+    job.unsubscribe();
+    this.inFlight.delete(projectId);
+  }
 }
 ```
 

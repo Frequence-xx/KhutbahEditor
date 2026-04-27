@@ -219,4 +219,33 @@ describe('JobManager.startUpload', () => {
     expect(call).not.toHaveBeenCalled();
     expect(bridge.auth.accessToken).not.toHaveBeenCalled();
   });
+
+  it('cancel between server-success and post-await: videoId is still recorded for retry-resume', async () => {
+    // Mock that resolves successfully but synchronously schedules a cancel
+    // to fire BEFORE the .then microtask flushes
+    let resolveUpload!: (v: unknown) => void;
+    const call = vi.fn(() => new Promise((r) => { resolveUpload = r; }));
+    const bridge = makeBridge(call as Bridge['call']);
+    const jm = new JobManager(bridge);
+
+    jm.startUpload('p1', { channelId: 'ch1', title: 'Khutbah' });
+
+    // Wait for auth + setRunState('uploading') to settle
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+
+    // Simulate: server returns success, then cancel fires before our post-await runs
+    resolveUpload({ video_id: 'vid-1' });
+    jm.cancel('p1');
+
+    // Drain microtasks so recordUpload + the abort guard execute
+    await new Promise((r) => setTimeout(r, 5));
+
+    // The videoId MUST be persisted (it's already on YouTube — we can't unship it)
+    expect(useProjects.getState().projects[0].part1?.uploads?.['ch1']?.videoId).toBe('vid-1');
+    expect(useProjects.getState().projects[0].part1?.uploads?.['ch1']?.status).toBe('done');
+
+    // But the upload sequence MUST stop — Part 2 was never attempted
+    expect(call).toHaveBeenCalledTimes(1);  // only the Part 1 upload.video
+  });
 });

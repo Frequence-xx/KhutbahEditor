@@ -1434,7 +1434,10 @@ private async runUpload(
 
 // uploadPart() and recordUpload() — see src/jobs/JobManager.ts for the full
 // implementation. uploadPart calls upload.video with the snake_case contract,
-// records the upload result via recordUpload, then best-effort calls
+// records the upload result via recordUpload BEFORE the post-await
+// abort-guard check (rationale: if cancel fires between server-success and
+// the check, the video is already on YouTube — losing the videoId would
+// cause a duplicate re-upload on retry), then best-effort calls
 // upload.thumbnail (failure swallowed). recordUpload merges the result into
 // part.uploads keyed by channelId, preserving other channels' entries.
 ```
@@ -1442,8 +1445,8 @@ private async runUpload(
 - [ ] **Step 6: Run tests to verify they pass**
 
 Run:
-- `npx vitest run tests/renderer/JobManager.startUpload.test.ts` — 7/7
-- `npx vitest run tests/renderer` — 64/64 (57 prior + 7 new)
+- `npx vitest run tests/renderer/JobManager.startUpload.test.ts` — 8/8
+- `npx vitest run tests/renderer` — 65/65 (57 prior + 8 new)
 
 - [ ] **Step 7: Commit**
 

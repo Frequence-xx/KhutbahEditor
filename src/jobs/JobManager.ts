@@ -250,14 +250,15 @@ export class JobManager {
         description: '',
         tags: [],
       });
-      if (abort.signal.aborted) return;
 
-      // Persist videoId before attempting thumbnail (so a thumbnail failure doesn't
-      // erase the upload videoId from the store).
+      // Persist videoId BEFORE the abort check — if cancel fires between server
+      // success and our abort check, we'd otherwise lose the videoId and re-upload
+      // on retry, creating a duplicate video on the channel.
       this.recordUpload(projectId, partNum, opts.channelId, {
         videoId: res.video_id,
         status: 'done',
       });
+      if (abort.signal.aborted) return;
 
       // Best-effort thumbnail upload. Failure must not break the sequence.
       if (opts.thumbnailPath) {

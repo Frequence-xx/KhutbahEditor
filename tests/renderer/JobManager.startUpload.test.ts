@@ -29,6 +29,24 @@ describe('JobManager.startUpload', () => {
     seed();
   });
 
+  it('clears lastUploadOpts after a successful upload (I1)', async () => {
+    const call = vi
+      .fn()
+      .mockResolvedValueOnce({ video_id: 'vid-1' })
+      .mockResolvedValueOnce({ video_id: 'vid-2' });
+    const jm = new JobManager(makeBridge(call as Bridge['call']));
+
+    jm.startUpload('p1', { channelId: 'ch1', title: 'KhutbahX' });
+    // Mid-upload, opts is persisted for retry.
+    expect(useProjects.getState().projects[0].lastUploadOpts).toBeDefined();
+
+    await vi.waitFor(() => {
+      expect(useProjects.getState().projects[0].runState).toBe('uploaded');
+    });
+    // After success, opts must be cleared so a stale retry can't re-fire.
+    expect(useProjects.getState().projects[0].lastUploadOpts).toBeUndefined();
+  });
+
   it('uploads part1 then part2 in sequence; transitions to uploaded on full success', async () => {
     const call = vi
       .fn()

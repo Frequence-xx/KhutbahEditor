@@ -318,6 +318,9 @@ export class JobManager {
         if (abort.signal.aborted) return;
       }
 
+      // Clear retry payload on success — stale opts must not survive a
+      // completed run, otherwise a later double-click on Retry would re-fire.
+      useProjects.getState().update(projectId, { lastUploadOpts: undefined });
       useProjects.getState().setRunState(projectId, 'uploaded');
       this.toast(projectId, 'success', `Upload complete: ${opts.title}`, /* alwaysShow */ true);
     } catch (err: unknown) {

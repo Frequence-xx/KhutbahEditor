@@ -3791,18 +3791,29 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 **Files:**
 - Modify: `src/App.tsx`
 
-- [ ] **Step 1: Read `src/App.tsx`** to see what needs to be preserved (`maybeAutoPilot()` entry point, top-level effects).
+**Contract note (correction during execution):** the original snippet below
+called `maybeAutoPilot()` with no args as a startup entrypoint, but the existing
+function in `src/lib/autopilot.ts` is `maybeAutoPilot(projectId)` — invoked
+per-project from button handlers in the legacy router. JobManager (Tasks 4-7)
+now handles per-project orchestration from Shell's modal handlers, so
+`maybeAutoPilot` is not called from `App.tsx` in the new design. Task 22 will
+rewire `lib/autopilot.ts` itself to define what happens after detect-success
+(auto-cut + auto-upload chain). The only app-level effect worth preserving from
+the previous 353-line screen router is `useSettings.getState().load()` on
+mount.
+
+- [ ] **Step 1: Read `src/App.tsx`** to see what needs to be preserved (top-level effects only — no `maybeAutoPilot` call).
 
 - [ ] **Step 2: Replace `App.tsx` content**
 
 ```tsx
 import { useEffect } from 'react';
 import { Shell } from './screens/Shell';
-import { maybeAutoPilot } from './lib/autopilot';
+import { useSettings } from './store/settings';
 
 export default function App() {
   useEffect(() => {
-    void maybeAutoPilot();
+    void useSettings.getState().load();
   }, []);
 
   return <Shell />;
@@ -3828,7 +3839,12 @@ Stop with Ctrl+C.
 git add src/App.tsx
 git commit -m "refactor(app): App.tsx now renders <Shell /> only
 
-Routing/state moved to Shell. maybeAutoPilot() entry point preserved.
+Routing/state moved to Shell. Settings load preserved (the only
+app-level effect from the previous 353-line screen router that's still
+needed). The previous maybeAutoPilot(projectId) per-project call is
+now obsolete: JobManager handles per-project orchestration from Shell's
+modal handlers, and Task 22 will define the auto-cut/auto-upload chain
+after detect success.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 ```

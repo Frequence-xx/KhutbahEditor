@@ -32,7 +32,11 @@ describe('JobManager.startDetect — thumbnail', () => {
       if (method === 'detect.run') return Promise.resolve(detectOk);
       return Promise.reject(new Error('unexpected method ' + method));
     });
-    const bridge: Bridge = { call: call as Bridge['call'], onProgress: vi.fn(() => () => {}) };
+    const bridge: Bridge = {
+      call: call as Bridge['call'],
+      onProgress: vi.fn(() => () => {}),
+      auth: { accessToken: vi.fn(() => Promise.resolve({ accessToken: 'mock-token' })) },
+    };
     const jm = new JobManager(bridge);
 
     jm.startDetect('p1');
@@ -51,7 +55,11 @@ describe('JobManager.startDetect — thumbnail', () => {
       if (method === 'detect.run') return Promise.resolve(detectOk);
       return Promise.reject(new Error('unexpected ' + method));
     });
-    const bridge: Bridge = { call: call as Bridge['call'], onProgress: vi.fn(() => () => {}) };
+    const bridge: Bridge = {
+      call: call as Bridge['call'],
+      onProgress: vi.fn(() => () => {}),
+      auth: { accessToken: vi.fn(() => Promise.resolve({ accessToken: 'mock-token' })) },
+    };
     const jm = new JobManager(bridge);
 
     jm.startDetect('p1');
@@ -67,7 +75,11 @@ describe('JobManager.startDetect — thumbnail', () => {
       if (method === 'detect.run') return Promise.resolve(detectOk);
       return Promise.reject(new Error('unexpected ' + method));
     });
-    const bridge: Bridge = { call: call as Bridge['call'], onProgress: vi.fn(() => () => {}) };
+    const bridge: Bridge = {
+      call: call as Bridge['call'],
+      onProgress: vi.fn(() => () => {}),
+      auth: { accessToken: vi.fn(() => Promise.resolve({ accessToken: 'mock-token' })) },
+    };
     const jm = new JobManager(bridge);
 
     jm.startDetect('p1');

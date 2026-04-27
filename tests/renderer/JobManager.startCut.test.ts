@@ -21,6 +21,7 @@ const seed = () =>
 const makeBridge = (call: Bridge['call']): Bridge => ({
   call,
   onProgress: vi.fn(() => () => {}),
+  auth: { accessToken: vi.fn(() => Promise.resolve({ accessToken: 'mock-token' })) },
 });
 
 describe('JobManager.startCut', () => {

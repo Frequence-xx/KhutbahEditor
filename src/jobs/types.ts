@@ -18,4 +18,7 @@ export type ProgressEvent = {
 export interface Bridge {
   call<T>(method: string, params?: unknown): Promise<T>;
   onProgress(listener: (ev: ProgressEvent) => void): () => void;
+  auth: {
+    accessToken(channelId: string): Promise<{ accessToken: string }>;
+  };
 }

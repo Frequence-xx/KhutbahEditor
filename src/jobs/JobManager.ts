@@ -166,8 +166,135 @@ export class JobManager {
         if (this.inFlight.get(projectId)?.abort === abort) this.inFlight.delete(projectId);
       });
   }
-  startUpload(_projectId: string, _opts: UploadOpts): void {
-    throw new Error('not implemented');
+  startUpload(projectId: string, opts: UploadOpts): void {
+    this.cancel(projectId);
+
+    const project = useProjects.getState().projects.find((p) => p.id === projectId);
+    if (!project) return;
+
+    const abort = new AbortController();
+    const unsubscribe = this.bridge.onProgress((ev: ProgressEvent) => {
+      if (ev.projectId === projectId) {
+        useProjects.getState().setProgress(projectId, ev.pct);
+      }
+    });
+    this.inFlight.set(projectId, { kind: 'upload', abort, unsubscribe });
+
+    // Run the async sequence.
+    this.runUpload(projectId, opts, abort).finally(() => {
+      unsubscribe();
+      if (this.inFlight.get(projectId)?.abort === abort) this.inFlight.delete(projectId);
+    });
+  }
+
+  private async runUpload(
+    projectId: string,
+    opts: UploadOpts,
+    abort: AbortController,
+  ): Promise<void> {
+    try {
+      const { accessToken } = await this.bridge.auth.accessToken(opts.channelId);
+      if (abort.signal.aborted) return;
+
+      useProjects.getState().setRunState(projectId, 'uploading');
+
+      // Part 1 — skip if already uploaded for this channel
+      const project1 = useProjects.getState().projects.find((p) => p.id === projectId);
+      if (!project1) return;
+      const part1Already = project1.part1?.uploads?.[opts.channelId]?.status === 'done';
+
+      if (!part1Already) {
+        await this.uploadPart(projectId, accessToken, opts, 1, abort);
+        if (abort.signal.aborted) return;
+      }
+
+      // Part 2 — skip if already uploaded for this channel
+      const project2 = useProjects.getState().projects.find((p) => p.id === projectId);
+      if (!project2) return;
+      const part2Already = project2.part2?.uploads?.[opts.channelId]?.status === 'done';
+
+      if (!part2Already) {
+        await this.uploadPart(projectId, accessToken, opts, 2, abort);
+        if (abort.signal.aborted) return;
+      }
+
+      useProjects.getState().setRunState(projectId, 'uploaded');
+    } catch (err: unknown) {
+      if (abort.signal.aborted) return;
+      const msg = err instanceof Error ? err.message : String(err);
+      useProjects.getState().setError(projectId, msg);
+    }
+  }
+
+  private async uploadPart(
+    projectId: string,
+    accessToken: string,
+    opts: UploadOpts,
+    partNum: 1 | 2,
+    abort: AbortController,
+  ): Promise<void> {
+    const project = useProjects.getState().projects.find((p) => p.id === projectId);
+    if (!project) return;
+    const part = partNum === 1 ? project.part1 : project.part2;
+    if (!part?.outputPath) {
+      throw new Error(`Part ${partNum} has no outputPath`);
+    }
+
+    const partTitle = `${opts.title} — Part ${partNum}`;
+
+    try {
+      const res = await this.bridge.call<{ video_id: string }>('upload.video', {
+        access_token: accessToken,
+        file_path: part.outputPath,
+        title: partTitle,
+        description: '',
+        tags: [],
+      });
+      if (abort.signal.aborted) return;
+
+      // Persist videoId before attempting thumbnail (so a thumbnail failure doesn't
+      // erase the upload videoId from the store).
+      this.recordUpload(projectId, partNum, opts.channelId, {
+        videoId: res.video_id,
+        status: 'done',
+      });
+
+      // Best-effort thumbnail upload. Failure must not break the sequence.
+      if (opts.thumbnailPath) {
+        try {
+          await this.bridge.call('upload.thumbnail', {
+            access_token: accessToken,
+            video_id: res.video_id,
+            thumbnail_path: opts.thumbnailPath,
+          });
+        } catch {
+          /* swallow — thumbnail is non-fatal */
+        }
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.recordUpload(projectId, partNum, opts.channelId, { status: 'failed', error: msg });
+      throw err;
+    }
+  }
+
+  private recordUpload(
+    projectId: string,
+    partNum: 1 | 2,
+    channelId: string,
+    result: {
+      videoId?: string;
+      status: 'pending' | 'uploading' | 'done' | 'failed';
+      error?: string;
+    },
+  ): void {
+    const project = useProjects.getState().projects.find((p) => p.id === projectId);
+    if (!project) return;
+    const partKey = partNum === 1 ? 'part1' : 'part2';
+    const part = project[partKey];
+    if (!part) return;
+    const uploads = { ...(part.uploads ?? {}), [channelId]: result };
+    useProjects.getState().update(projectId, { [partKey]: { ...part, uploads } });
   }
   retry(_projectId: string): void {
     throw new Error('not implemented');

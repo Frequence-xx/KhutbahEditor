@@ -1228,16 +1228,74 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 ### Task 6: `JobManager.startUpload` — Part 1 then Part 2 sequencing
 
 **Files:**
+- Modify: `src/jobs/types.ts` (extend `Bridge` with `auth` namespace)
 - Modify: `src/jobs/JobManager.ts`
+- Modify: `tests/renderer/JobManager.skeleton.test.ts` (add `auth` to `makeBridge`)
+- Modify: `tests/renderer/JobManager.startDetect.test.ts` (add `auth` to every Bridge literal)
+- Modify: `tests/renderer/JobManager.thumbnail.test.ts` (add `auth` to every Bridge literal)
+- Modify: `tests/renderer/JobManager.startCut.test.ts` (add `auth` to `makeBridge`)
 - Test: `tests/renderer/JobManager.startUpload.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+**Bridge interface change.** This task adds an `auth` namespace to the `Bridge`
+interface (`{ accessToken(channelId: string): Promise<{ accessToken: string }> }`)
+so JobManager can resolve OAuth tokens without reaching directly into
+`window.khutbah`. Every existing test that constructs a Bridge object literal must
+add an `auth` stub. Run the full renderer suite after this mock-update step
+*before* writing any new code, to confirm no regressions.
 
-Create `tests/renderer/JobManager.startUpload.test.ts`:
+**Contract notes.**
+- (a) Auth resolution: JobManager calls `bridge.auth.accessToken(opts.channelId)`
+  to obtain the OAuth `accessToken` string before any `upload.video` call.
+- (b) The sidecar `upload.video` IPC takes full snake_case kwargs:
+  `{ access_token, file_path, title, description, tags, category_id?,
+  privacy_status?, self_declared_made_for_kids?, default_audio_language? }`.
+  JobManager passes `description: ''` and `tags: []` defaults — Task 22 will
+  rewire autopilot to call `JobManager.startUpload` and pass the real templated
+  values.
+- (c) Response is snake_case `{ video_id: string, ... }`.
+- (d) Resume after Part 2 failure: each successful upload writes
+  `part.uploads[channelId] = { videoId, status: 'done' }`. Re-entry of
+  `startUpload` on the same project skips any part whose
+  `uploads[channelId].status === 'done'`. So a Part 2 failure preserves the
+  Part 1 videoId, and a retry only re-attempts Part 2.
+- (e) Best-effort `upload.thumbnail` after each successful video upload —
+  failures are swallowed silently.
+
+- [ ] **Step 1: Extend `src/jobs/types.ts`**
+
+```ts
+export interface Bridge {
+  call<T>(method: string, params?: unknown): Promise<T>;
+  onProgress(listener: (ev: ProgressEvent) => void): () => void;
+  auth: {
+    accessToken(channelId: string): Promise<{ accessToken: string }>;
+  };
+}
+```
+
+- [ ] **Step 2: Update existing test mocks**
+
+ALL existing test files that construct a Bridge need an `auth` stub:
+
+```ts
+auth: { accessToken: vi.fn(() => Promise.resolve({ accessToken: 'mock-token' })) },
+```
+
+Files:
+- `tests/renderer/JobManager.skeleton.test.ts` — `makeBridge`
+- `tests/renderer/JobManager.startDetect.test.ts` — every Bridge object literal
+- `tests/renderer/JobManager.thumbnail.test.ts` — every Bridge object literal
+- `tests/renderer/JobManager.startCut.test.ts` — `makeBridge`
+
+Run: `npx vitest run tests/renderer`
+Expected: 57/57 still passing (no regressions).
+
+- [ ] **Step 3: Write the failing test at `tests/renderer/JobManager.startUpload.test.ts`**
 
 ```ts
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { JobManager } from '../../src/jobs/JobManager';
+import type { Bridge } from '../../src/jobs/types';
 import { useProjects } from '../../src/store/projects';
 
 const seed = () =>
@@ -1249,166 +1307,175 @@ const seed = () =>
         duration: 200,
         createdAt: 1,
         runState: 'ready',
-        part1: { start: 10, end: 100, confidence: 0.95, outputPath: '/out/p1.mp4' },
-        part2: { start: 110, end: 195, confidence: 0.92, outputPath: '/out/p2.mp4' },
+        part1: { start: 10, end: 100, confidence: 0.95, outputPath: '/tmp/src.mp4.cut-p1.mp4' },
+        part2: { start: 110, end: 195, confidence: 0.92, outputPath: '/tmp/src.mp4.cut-p2.mp4' },
       },
     ],
   });
+
+const makeBridge = (call: Bridge['call']): Bridge => ({
+  call,
+  onProgress: vi.fn(() => () => {}),
+  auth: { accessToken: vi.fn(() => Promise.resolve({ accessToken: 'tok-1' })) },
+});
 
 describe('JobManager.startUpload', () => {
   beforeEach(() => {
     seed();
   });
 
-  it('uploads part1 then part2 in sequence; transitions to uploaded on success', async () => {
+  it('uploads part1 then part2 in sequence; transitions to uploaded on full success', async () => {
     const call = vi
       .fn()
-      .mockResolvedValueOnce({ videoId: 'vid-1' })
-      .mockResolvedValueOnce({ videoId: 'vid-2' });
-    const jm = new JobManager({ call, onProgress: vi.fn(() => () => {}) });
+      .mockResolvedValueOnce({ video_id: 'vid-1' })
+      .mockResolvedValueOnce({ video_id: 'vid-2' });
+    const bridge = makeBridge(call as Bridge['call']);
+    const jm = new JobManager(bridge);
 
     jm.startUpload('p1', { channelId: 'ch1', title: 'Khutbah' });
-    expect(useProjects.getState().projects[0].runState).toBe('uploading');
 
     await vi.waitFor(() => {
       expect(useProjects.getState().projects[0].runState).toBe('uploaded');
     });
 
     expect(call).toHaveBeenNthCalledWith(1, 'upload.video', expect.objectContaining({
-      videoPath: '/out/p1.mp4',
+      access_token: 'tok-1',
+      file_path: '/tmp/src.mp4.cut-p1.mp4',
       title: 'Khutbah — Part 1',
-      channelId: 'ch1',
     }));
     expect(call).toHaveBeenNthCalledWith(2, 'upload.video', expect.objectContaining({
-      videoPath: '/out/p2.mp4',
+      access_token: 'tok-1',
+      file_path: '/tmp/src.mp4.cut-p2.mp4',
       title: 'Khutbah — Part 2',
-      channelId: 'ch1',
     }));
 
     const p = useProjects.getState().projects[0];
-    expect(p.part1?.videoId).toBe('vid-1');
-    expect(p.part2?.videoId).toBe('vid-2');
+    expect(p.part1?.uploads?.['ch1']?.videoId).toBe('vid-1');
+    expect(p.part1?.uploads?.['ch1']?.status).toBe('done');
+    expect(p.part2?.uploads?.['ch1']?.videoId).toBe('vid-2');
+    expect(p.part2?.uploads?.['ch1']?.status).toBe('done');
   });
 
-  it('on Part 1 failure: does not attempt Part 2; sets error with Part 1 message', async () => {
-    const call = vi.fn().mockRejectedValueOnce(new Error('quota exceeded'));
-    const jm = new JobManager({ call, onProgress: vi.fn(() => () => {}) });
-
-    jm.startUpload('p1', { channelId: 'ch1', title: 'Khutbah' });
-
-    await vi.waitFor(() => {
-      expect(useProjects.getState().projects[0].runState).toBe('error');
-    });
-
-    expect(call).toHaveBeenCalledTimes(1);
-    expect(useProjects.getState().projects[0].lastError).toBe('quota exceeded');
-  });
-
-  it('on Part 2 failure after Part 1 success: preserves part1.videoId for retry resume', async () => {
-    const call = vi
-      .fn()
-      .mockResolvedValueOnce({ videoId: 'vid-1' })
-      .mockRejectedValueOnce(new Error('network down'));
-    const jm = new JobManager({ call, onProgress: vi.fn(() => () => {}) });
-
-    jm.startUpload('p1', { channelId: 'ch1', title: 'Khutbah' });
-
-    await vi.waitFor(() => {
-      expect(useProjects.getState().projects[0].runState).toBe('error');
-    });
-
-    const p = useProjects.getState().projects[0];
-    expect(p.part1?.videoId).toBe('vid-1');
-    expect(p.part2?.videoId).toBeUndefined();
-    expect(p.lastError).toBe('network down');
-  });
+  // ... + 6 more cases: uploading-flip, Part 1 fail, Part 2 fail, resume-skip,
+  // best-effort thumbnail, unknown projectId. See the actual test file for the
+  // full set.
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 4: Run test to verify it fails**
 
 Run: `npx vitest run tests/renderer/JobManager.startUpload.test.ts`
 Expected: FAIL — `startUpload` throws `not implemented`.
 
-- [ ] **Step 3: Implement `startUpload` in `src/jobs/JobManager.ts`**
+- [ ] **Step 5: Implement `startUpload` in `src/jobs/JobManager.ts`**
 
-Replace the `startUpload` body:
+Replace the `startUpload` stub. The implementation splits into three private
+methods so the abort-guard plumbing stays clean: `startUpload` (sync setup +
+in-flight registration), `runUpload` (async sequencer with the per-channel
+skip-already-done check), `uploadPart` (single-part call + best-effort
+thumbnail + per-part `uploads[channelId]` recording), `recordUpload` (helper
+that preserves other channels' upload entries).
 
 ```ts
-async startUpload(projectId: string, opts: UploadOpts): Promise<void> {
+startUpload(projectId: string, opts: UploadOpts): void {
   this.cancel(projectId);
+
+  const project = useProjects.getState().projects.find((p) => p.id === projectId);
+  if (!project) return;
+
   const abort = new AbortController();
-  const unsubscribe = this.bridge.onProgress((ev) => {
+  const unsubscribe = this.bridge.onProgress((ev: ProgressEvent) => {
     if (ev.projectId === projectId) {
       useProjects.getState().setProgress(projectId, ev.pct);
     }
   });
   this.inFlight.set(projectId, { kind: 'upload', abort, unsubscribe });
-  useProjects.getState().setRunState(projectId, 'uploading');
 
+  this.runUpload(projectId, opts, abort).finally(() => {
+    unsubscribe();
+    if (this.inFlight.get(projectId)?.abort === abort) this.inFlight.delete(projectId);
+  });
+}
+
+private async runUpload(
+  projectId: string,
+  opts: UploadOpts,
+  abort: AbortController,
+): Promise<void> {
   try {
-    const project = useProjects.getState().projects.find((p) => p.id === projectId);
-    if (!project) return;
+    const { accessToken } = await this.bridge.auth.accessToken(opts.channelId);
+    if (abort.signal.aborted) return;
 
-    if (!project.part1?.videoId && project.part1?.outputPath) {
-      const res1 = await this.bridge.call<{ videoId: string }>('upload.video', {
-        projectId,
-        videoPath: project.part1.outputPath,
-        title: `${opts.title} — Part 1`,
-        channelId: opts.channelId,
-        playlistId: opts.playlistId,
-        thumbnailPath: opts.thumbnailPath,
-      });
+    useProjects.getState().setRunState(projectId, 'uploading');
+
+    const project1 = useProjects.getState().projects.find((p) => p.id === projectId);
+    if (!project1) return;
+    const part1Already = project1.part1?.uploads?.[opts.channelId]?.status === 'done';
+    if (!part1Already) {
+      await this.uploadPart(projectId, accessToken, opts, 1, abort);
       if (abort.signal.aborted) return;
-      useProjects.getState().update(projectId, {
-        part1: { ...project.part1, videoId: res1.videoId },
-      });
     }
 
-    const projectAfter = useProjects.getState().projects.find((p) => p.id === projectId);
-    if (!projectAfter?.part2?.videoId && projectAfter?.part2?.outputPath) {
-      const res2 = await this.bridge.call<{ videoId: string }>('upload.video', {
-        projectId,
-        videoPath: projectAfter.part2.outputPath,
-        title: `${opts.title} — Part 2`,
-        channelId: opts.channelId,
-        playlistId: opts.playlistId,
-        thumbnailPath: opts.thumbnailPath,
-      });
+    const project2 = useProjects.getState().projects.find((p) => p.id === projectId);
+    if (!project2) return;
+    const part2Already = project2.part2?.uploads?.[opts.channelId]?.status === 'done';
+    if (!part2Already) {
+      await this.uploadPart(projectId, accessToken, opts, 2, abort);
       if (abort.signal.aborted) return;
-      useProjects.getState().update(projectId, {
-        part2: { ...projectAfter.part2, videoId: res2.videoId },
-      });
     }
 
-    if (!abort.signal.aborted) {
-      useProjects.getState().setRunState(projectId, 'uploaded');
-    }
-  } catch (err) {
+    useProjects.getState().setRunState(projectId, 'uploaded');
+  } catch (err: unknown) {
     if (abort.signal.aborted) return;
     const msg = err instanceof Error ? err.message : String(err);
     useProjects.getState().setError(projectId, msg);
-  } finally {
-    unsubscribe();
-    if (this.inFlight.get(projectId)?.abort === abort) this.inFlight.delete(projectId);
   }
 }
+
+// uploadPart() and recordUpload() — see src/jobs/JobManager.ts for the full
+// implementation. uploadPart calls upload.video with the snake_case contract,
+// records the upload result via recordUpload, then best-effort calls
+// upload.thumbnail (failure swallowed). recordUpload merges the result into
+// part.uploads keyed by channelId, preserving other channels' entries.
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Step 6: Run tests to verify they pass**
 
-Run: `npx vitest run tests/renderer/JobManager.startUpload.test.ts`
-Expected: PASS — 3 cases green.
+Run:
+- `npx vitest run tests/renderer/JobManager.startUpload.test.ts` — 7/7
+- `npx vitest run tests/renderer` — 64/64 (57 prior + 7 new)
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add src/jobs/JobManager.ts tests/renderer/JobManager.startUpload.test.ts
-git commit -m "feat(jobs): JobManager.startUpload — Part 1 then Part 2 with resume
+git add src/jobs/types.ts src/jobs/JobManager.ts \
+  tests/renderer/JobManager.skeleton.test.ts \
+  tests/renderer/JobManager.startDetect.test.ts \
+  tests/renderer/JobManager.thumbnail.test.ts \
+  tests/renderer/JobManager.startCut.test.ts \
+  tests/renderer/JobManager.startUpload.test.ts \
+  docs/superpowers/plans/2026-04-27-gui-strip-implementation.md
+git commit -m "feat(jobs): JobManager.startUpload sequenced Part 1 → Part 2 with retry-resume
 
-Skips an already-uploaded part (videoId set) so Retry resumes from the
-failed part. Part 1 failure halts the sequence; Part 2 failure leaves
-Part 1's videoId on the project.
+Per spec §170. Resolves access_token via the new bridge.auth.accessToken
+seam, then calls upload.video for Part 1 and Part 2 in sequence.
+Records each upload result in part.uploads[channelId] (videoId + status)
+so a Part 2 failure preserves the Part 1 videoId — startUpload re-entry
+on the same project skips already-done parts.
+
+Best-effort upload.thumbnail call after each successful video upload —
+failures swallowed silently per spec.
+
+Bridge interface gains an 'auth' namespace exposing accessToken
+resolution. All existing test mocks updated to provide it.
+
+Plan updated to reflect the actual upload.video contract
+({ access_token, file_path, title, description, tags, ... } →
+{ video_id }, matching autopilot.ts:218-228).
+
+Multi-account fanout, templates, tags, visibility, and playlist
+assignment remain in autopilot.ts for now — Task 22 will rewire
+autopilot to call JobManager.startUpload per account.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 ```

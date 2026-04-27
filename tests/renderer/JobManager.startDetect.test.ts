@@ -23,6 +23,7 @@ describe('JobManager.startDetect', () => {
     const bridge: Bridge = {
       call: vi.fn(() => callPromise),
       onProgress: vi.fn(() => () => {}),
+      auth: { accessToken: vi.fn(() => Promise.resolve({ accessToken: 'mock-token' })) },
     };
     const jm = new JobManager(bridge);
 
@@ -57,6 +58,7 @@ describe('JobManager.startDetect', () => {
         }),
       ),
       onProgress: vi.fn(() => () => {}),
+      auth: { accessToken: vi.fn(() => Promise.resolve({ accessToken: 'mock-token' })) },
     };
     const jm = new JobManager(bridge);
 
@@ -70,6 +72,7 @@ describe('JobManager.startDetect', () => {
     const bridge: Bridge = {
       call: vi.fn(() => Promise.reject(new Error('sidecar crash'))),
       onProgress: vi.fn(() => () => {}),
+      auth: { accessToken: vi.fn(() => Promise.resolve({ accessToken: 'mock-token' })) },
     };
     const jm = new JobManager(bridge);
 
@@ -89,6 +92,7 @@ describe('JobManager.startDetect', () => {
         listener = l;
         return () => {};
       }),
+      auth: { accessToken: vi.fn(() => Promise.resolve({ accessToken: 'mock-token' })) },
     };
     const jm = new JobManager(bridge);
     jm.startDetect('p1');
@@ -104,6 +108,7 @@ describe('JobManager.startDetect', () => {
     const bridge: Bridge = {
       call: vi.fn(),
       onProgress: vi.fn(() => () => {}),
+      auth: { accessToken: vi.fn(() => Promise.resolve({ accessToken: 'mock-token' })) },
     };
     const jm = new JobManager(bridge);
     jm.startDetect('does-not-exist');
@@ -116,6 +121,7 @@ describe('JobManager.startDetect', () => {
     const bridge: Bridge = {
       call: vi.fn(() => Promise.resolve({ error: 'opening_not_found' })),
       onProgress: vi.fn(() => () => {}),
+      auth: { accessToken: vi.fn(() => Promise.resolve({ accessToken: 'mock-token' })) },
     };
     const jm = new JobManager(bridge);
     jm.startDetect('p1');
@@ -135,6 +141,7 @@ describe('JobManager.startDetect', () => {
           }),
       ),
       onProgress: vi.fn(() => () => {}),
+      auth: { accessToken: vi.fn(() => Promise.resolve({ accessToken: 'mock-token' })) },
     };
     const jm = new JobManager(bridge);
     jm.startDetect('p1');

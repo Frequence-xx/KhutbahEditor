@@ -6,6 +6,7 @@ import { useProjects } from '../../src/store/projects';
 const makeBridge = (): Bridge => ({
   call: vi.fn(),
   onProgress: vi.fn(() => () => {}),
+  auth: { accessToken: vi.fn(() => Promise.resolve({ accessToken: 'mock-token' })) },
 });
 
 describe('JobManager — skeleton', () => {

@@ -516,7 +516,7 @@ describe('JobManager.startDetect', () => {
     seed();
   });
 
-  it('transitions runState idle → detecting → ready when both parts >= 0.9', async () => {
+  it('transitions runState idle → detecting → ready when overall_confidence >= 0.9', async () => {
     let resolve!: (v: unknown) => void;
     const callPromise = new Promise((r) => { resolve = r; });
     const bridge: Bridge = {
@@ -529,8 +529,11 @@ describe('JobManager.startDetect', () => {
     expect(useProjects.getState().projects[0].runState).toBe('detecting');
 
     resolve({
+      duration: 200,
       part1: { start: 10, end: 100, confidence: 0.95 },
       part2: { start: 110, end: 200, confidence: 0.92 },
+      lang_dominant: 'ar',
+      overall_confidence: 0.93,
     });
     await Promise.resolve();
     await Promise.resolve();
@@ -541,12 +544,15 @@ describe('JobManager.startDetect', () => {
     expect(p.part2?.confidence).toBe(0.92);
   });
 
-  it('transitions to needs_review when either part < 0.9', async () => {
+  it('transitions to needs_review when overall_confidence < 0.9', async () => {
     const bridge: Bridge = {
       call: vi.fn(() =>
         Promise.resolve({
+          duration: 200,
           part1: { start: 10, end: 100, confidence: 0.95 },
           part2: { start: 110, end: 200, confidence: 0.71 },
+          lang_dominant: 'ar',
+          overall_confidence: 0.71,
         }),
       ),
       onProgress: vi.fn(() => () => {}),
@@ -602,18 +608,35 @@ Expected: FAIL — `startDetect` throws `not implemented`.
 
 - [ ] **Step 3: Implement `startDetect` in `src/jobs/JobManager.ts`**
 
-Replace the `startDetect` body and add the helper. The full file becomes:
+Replace the `startDetect` body and add the `DetectionResult` type. The full file becomes:
 
 ```ts
 import type { Boundary, Bridge, JobKind, ProgressEvent, UploadOpts } from './types';
 import { useProjects } from '../store/projects';
-import { useSettings } from '../store/settings';
 
 type InFlight = {
   kind: JobKind;
   abort: AbortController;
   unsubscribe: () => void;
 };
+
+type DetectionPart = {
+  start: number;
+  end: number;
+  confidence: number;
+  transcript_at_start?: string;
+  transcript_at_end?: string;
+};
+
+type DetectionResult =
+  | {
+      duration: number;
+      part1: DetectionPart;
+      part2: DetectionPart;
+      lang_dominant: string;
+      overall_confidence: number;
+    }
+  | { error: string; duration?: number };
 
 const REVIEW_THRESHOLD = 0.9;
 
@@ -623,6 +646,10 @@ export class JobManager {
 
   startDetect(projectId: string): void {
     this.cancel(projectId);
+
+    const project = useProjects.getState().projects.find((p) => p.id === projectId);
+    if (!project) return;
+
     const abort = new AbortController();
     const unsubscribe = this.bridge.onProgress((ev: ProgressEvent) => {
       if (ev.projectId === projectId) {
@@ -631,24 +658,20 @@ export class JobManager {
     });
     this.inFlight.set(projectId, { kind: 'detect', abort, unsubscribe });
 
-    const project = useProjects.getState().projects.find((p) => p.id === projectId);
-    if (!project) return;
-
     useProjects.getState().setRunState(projectId, 'detecting');
 
-    const device = useSettings.getState().computeDevice ?? 'auto';
     this.bridge
-      .call<{ part1: { start: number; end: number; confidence: number }; part2: { start: number; end: number; confidence: number } }>(
-        'detect.run',
-        { projectId, sourcePath: project.sourcePath, device },
-      )
+      .call<DetectionResult>('detect.run', { audio_path: project.sourcePath })
       .then((res) => {
         if (abort.signal.aborted) return;
+        if ('error' in res) {
+          useProjects.getState().setError(projectId, res.error);
+          return;
+        }
         useProjects.getState().update(projectId, { part1: res.part1, part2: res.part2 });
-        const lo = Math.min(res.part1.confidence, res.part2.confidence);
         useProjects
           .getState()
-          .setRunState(projectId, lo < REVIEW_THRESHOLD ? 'needs_review' : 'ready');
+          .setRunState(projectId, res.overall_confidence < REVIEW_THRESHOLD ? 'needs_review' : 'ready');
       })
       .catch((err: unknown) => {
         if (abort.signal.aborted) return;
@@ -684,12 +707,17 @@ export class JobManager {
 }
 ```
 
-If `src/store/settings.ts` does not yet expose `computeDevice`, read its current shape and add a `computeDevice?: 'cpu' | 'cuda' | 'auto'` field with a default of `'auto'`. (This may already be present from prior work; if so, no change needed.)
+Contract notes (verified against `python-pipeline/khutbah_pipeline/__main__.py:122-152` and the existing caller `src/lib/autopilot.ts:7-17, 86-100`):
+
+- The renderer passes only `{ audio_path }`. `device` flows via the `KHUTBAH_COMPUTE_DEVICE` env var that `electron/main.ts` sets at sidecar startup — passing it as a kwarg here would silently change the precedence model.
+- `projectId` is a renderer concept; the sidecar does not know about projects.
+- The response is a discriminated union: success has `overall_confidence`; failure has `{ error: string }`. Use `overall_confidence` (the sidecar's combined value) — do NOT recompute as `Math.min(part1.confidence, part2.confidence)`.
+- The `find(project)` check must happen BEFORE listener subscription, otherwise an unknown projectId leaks both the `bridge.onProgress` subscription and the `inFlight` map entry.
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run tests/renderer/JobManager.startDetect.test.ts`
-Expected: PASS — 4 cases green.
+Expected: PASS — all cases green (4 happy/error/progress + 3 contract guards: unknown projectId, sidecar-error response, cancel-during-detection).
 
 - [ ] **Step 5: Run the full renderer suite**
 
@@ -699,13 +727,14 @@ Expected: PASS, no regressions in the existing tests.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/jobs/JobManager.ts tests/renderer/JobManager.startDetect.test.ts src/store/settings.ts
+git add src/jobs/JobManager.ts tests/renderer/JobManager.startDetect.test.ts
 git commit -m "feat(jobs): JobManager.startDetect with progress + needs_review threshold
 
 Wires detect.run via the IPC bridge, subscribes to progress events,
 transitions runState idle → detecting → ready or needs_review based on
-the lower of part1/part2 confidence (threshold 0.9). Errors transition
-to runState=error with lastError set.
+the sidecar's overall_confidence (threshold 0.9). Errors — both rejected
+promises and { error } responses from the sidecar — transition to
+runState=error with lastError set.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 ```

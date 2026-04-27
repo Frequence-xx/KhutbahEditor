@@ -1,12 +1,29 @@
 import type { Boundary, Bridge, JobKind, ProgressEvent, UploadOpts } from './types';
 import { useProjects } from '../store/projects';
-import { useSettings } from '../store/settings';
 
 type InFlight = {
   kind: JobKind;
   abort: AbortController;
   unsubscribe: () => void;
 };
+
+type DetectionPart = {
+  start: number;
+  end: number;
+  confidence: number;
+  transcript_at_start?: string;
+  transcript_at_end?: string;
+};
+
+type DetectionResult =
+  | {
+      duration: number;
+      part1: DetectionPart;
+      part2: DetectionPart;
+      lang_dominant: string;
+      overall_confidence: number;
+    }
+  | { error: string; duration?: number };
 
 const REVIEW_THRESHOLD = 0.9;
 
@@ -16,6 +33,10 @@ export class JobManager {
 
   startDetect(projectId: string): void {
     this.cancel(projectId);
+
+    const project = useProjects.getState().projects.find((p) => p.id === projectId);
+    if (!project) return;
+
     const abort = new AbortController();
     const unsubscribe = this.bridge.onProgress((ev: ProgressEvent) => {
       if (ev.projectId === projectId) {
@@ -24,24 +45,20 @@ export class JobManager {
     });
     this.inFlight.set(projectId, { kind: 'detect', abort, unsubscribe });
 
-    const project = useProjects.getState().projects.find((p) => p.id === projectId);
-    if (!project) return;
-
     useProjects.getState().setRunState(projectId, 'detecting');
 
-    const device = useSettings.getState().settings?.computeDevice ?? 'auto';
     this.bridge
-      .call<{
-        part1: { start: number; end: number; confidence: number };
-        part2: { start: number; end: number; confidence: number };
-      }>('detect.run', { projectId, sourcePath: project.sourcePath, device })
+      .call<DetectionResult>('detect.run', { audio_path: project.sourcePath })
       .then((res) => {
         if (abort.signal.aborted) return;
+        if ('error' in res) {
+          useProjects.getState().setError(projectId, res.error);
+          return;
+        }
         useProjects.getState().update(projectId, { part1: res.part1, part2: res.part2 });
-        const lo = Math.min(res.part1.confidence, res.part2.confidence);
         useProjects
           .getState()
-          .setRunState(projectId, lo < REVIEW_THRESHOLD ? 'needs_review' : 'ready');
+          .setRunState(projectId, res.overall_confidence < REVIEW_THRESHOLD ? 'needs_review' : 'ready');
       })
       .catch((err: unknown) => {
         if (abort.signal.aborted) return;

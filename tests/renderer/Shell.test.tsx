@@ -111,6 +111,29 @@ describe('Shell', () => {
     expect(screen.queryByText(/Upload to YouTube/i)).toBeNull();
   });
 
+  it('clicking × on a project tile asks for confirmation, then removes + clears selection (I3)', () => {
+    useProjects.setState({ projects: [ready] });
+    useUi.setState({ selectedProjectId: 'p1', view: 'review' });
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<Shell />);
+    fireEvent.click(screen.getByRole('button', { name: /delete p1\.mp4/i }));
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(useProjects.getState().projects).toHaveLength(0);
+    expect(useUi.getState().selectedProjectId).toBeNull();
+    confirmSpy.mockRestore();
+  });
+
+  it('declining the delete confirmation keeps the project (I3)', () => {
+    useProjects.setState({ projects: [ready] });
+    useUi.setState({ selectedProjectId: 'p1', view: 'review' });
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    render(<Shell />);
+    fireEvent.click(screen.getByRole('button', { name: /delete p1\.mp4/i }));
+    expect(useProjects.getState().projects).toHaveLength(1);
+    expect(useUi.getState().selectedProjectId).toBe('p1');
+    confirmSpy.mockRestore();
+  });
+
   it('upload completes (runState=uploaded) while view=upload: redirects to review (C3)', async () => {
     useProjects.setState({ projects: [{ ...ready, runState: 'uploading' }] });
     useUi.setState({ selectedProjectId: 'p1', view: 'upload' });

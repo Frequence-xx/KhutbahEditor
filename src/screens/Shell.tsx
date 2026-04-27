@@ -18,6 +18,7 @@ export function Shell() {
   const selectedProjectId = useUi((s) => s.selectedProjectId);
   const view = useUi((s) => s.view);
   const select = useUi((s) => s.select);
+  const clearSelection = useUi((s) => s.clearSelection);
   const setView = useUi((s) => s.setView);
 
   const project = useMemo(
@@ -51,6 +52,14 @@ export function Shell() {
     select(id);
     jm.startDetect(id);
     setModalOpen(false);
+  };
+  const handleDelete = (id: string) => {
+    const p = useProjects.getState().projects.find((x) => x.id === id);
+    const name = p?.sourcePath.split('/').pop() ?? 'this project';
+    if (!window.confirm(`Delete ${name}? This cannot be undone.`)) return;
+    jm.cancel(id);
+    useProjects.getState().remove(id);
+    if (selectedProjectId === id) clearSelection();
   };
   const handleSubmitDual = (audioPath: string, videoPath: string) => {
     const id = `proj-${Date.now()}`;
@@ -122,6 +131,7 @@ export function Shell() {
         onSelect={select}
         onNew={() => setModalOpen(true)}
         onSettings={() => setView('settings')}
+        onDelete={handleDelete}
       />
       <main className="flex-1 min-w-0">{rightPane}</main>
       <NewKhutbahModal

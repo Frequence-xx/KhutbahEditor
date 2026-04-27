@@ -6,6 +6,7 @@ export type SidebarProps = {
   onSelect: (id: string) => void;
   onNew: () => void;
   onSettings: () => void;
+  onDelete?: (id: string) => void;
 };
 
 const subtitleFor = (p: ReturnType<typeof useProjects.getState>['projects'][number]): string => {
@@ -30,7 +31,7 @@ const subtitleFor = (p: ReturnType<typeof useProjects.getState>['projects'][numb
   }
 };
 
-export function Sidebar({ selectedId, onSelect, onNew, onSettings }: SidebarProps) {
+export function Sidebar({ selectedId, onSelect, onNew, onSettings, onDelete }: SidebarProps) {
   const projects = useProjects((s) => s.projects);
   const sorted = [...projects].sort((a, b) => b.createdAt - a.createdAt);
 
@@ -50,24 +51,41 @@ export function Sidebar({ selectedId, onSelect, onNew, onSettings }: SidebarProp
           const name = p.sourcePath.split('/').pop() ?? p.id;
           const isActive = p.id === selectedId;
           return (
-            <button
+            <div
               key={p.id}
-              onClick={() => onSelect(p.id)}
-              className={`w-full flex items-center gap-2 px-2 py-2 rounded mb-1 text-left ${isActive ? 'bg-slate-800' : 'hover:bg-slate-900'}`}
+              className={`group relative w-full flex items-center gap-2 px-2 py-2 rounded mb-1 ${isActive ? 'bg-slate-800' : 'hover:bg-slate-900'}`}
             >
-              <div className="relative w-12 h-8 bg-slate-700 rounded flex-shrink-0">
-                {p.thumbnailPath && (
-                  <img src={`file://${p.thumbnailPath}`} alt="" className="w-full h-full object-cover rounded" />
-                )}
-                <span className="absolute -top-0.5 -right-0.5 ring-1 ring-slate-950 rounded-full">
-                  <StatusDot runState={p.runState} />
-                </span>
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="text-slate-100 text-xs truncate">{name}</div>
-                <div className="text-slate-500 text-[10px] truncate">{subtitleFor(p)}</div>
-              </div>
-            </button>
+              <button
+                onClick={() => onSelect(p.id)}
+                className="flex-1 flex items-center gap-2 text-left min-w-0"
+              >
+                <div className="relative w-12 h-8 bg-slate-700 rounded flex-shrink-0">
+                  {p.thumbnailPath && (
+                    <img src={`file://${p.thumbnailPath}`} alt="" className="w-full h-full object-cover rounded" />
+                  )}
+                  <span className="absolute -top-0.5 -right-0.5 ring-1 ring-slate-950 rounded-full">
+                    <StatusDot runState={p.runState} />
+                  </span>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-slate-100 text-xs truncate">{name}</div>
+                  <div className="text-slate-500 text-[10px] truncate">{subtitleFor(p)}</div>
+                </div>
+              </button>
+              {onDelete && (
+                <button
+                  type="button"
+                  aria-label={`Delete ${name}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDelete(p.id);
+                  }}
+                  className="opacity-0 group-hover:opacity-100 focus:opacity-100 px-1.5 text-slate-400 hover:text-danger text-sm rounded"
+                >
+                  ×
+                </button>
+              )}
+            </div>
           );
         })}
       </div>

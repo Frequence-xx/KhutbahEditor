@@ -42,4 +42,23 @@ describe('Sidebar', () => {
     fireEvent.click(screen.getByRole('button', { name: /settings/i }));
     expect(onSettings).toHaveBeenCalled();
   });
+
+  it('clicking the × on a row calls onDelete with that id and stops propagation (I3)', () => {
+    const onDelete = vi.fn();
+    const onSelect = vi.fn();
+    render(
+      <Sidebar
+        selectedId={null}
+        onSelect={onSelect}
+        onNew={() => {}}
+        onSettings={() => {}}
+        onDelete={onDelete}
+      />,
+    );
+    const deleteBtn = screen.getByRole('button', { name: /delete a\.mp4/i });
+    fireEvent.click(deleteBtn);
+    expect(onDelete).toHaveBeenCalledWith('a');
+    // Click on × must not also trigger row's onSelect
+    expect(onSelect).not.toHaveBeenCalled();
+  });
 });

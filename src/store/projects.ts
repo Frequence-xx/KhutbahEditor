@@ -1,6 +1,16 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 
+export type RunState =
+  | 'idle'
+  | 'detecting'
+  | 'cutting'
+  | 'needs_review'
+  | 'ready'
+  | 'uploading'
+  | 'uploaded'
+  | 'error';
+
 export type PartUploadResult = {
   videoId?: string;
   status: 'pending' | 'uploading' | 'done' | 'failed';
@@ -13,10 +23,7 @@ export type Part = {
   confidence?: number;
   transcript?: string;
   outputPath?: string;
-  /** Multi-account upload results keyed by channelId. */
   uploads?: Record<string, PartUploadResult>;
-  /** Legacy single-account fields (Phase 1-3 pre-multi-account). Kept for back-compat
-      until the Upload screen reads from `uploads` map. */
   videoId?: string;
 };
 
@@ -24,11 +31,13 @@ export type Project = {
   id: string;
   sourcePath: string;
   proxyPath?: string;
-  /** True when the source was already scrub-friendly and proxy generation was skipped. */
   proxySkipped?: boolean;
   duration: number;
   createdAt: number;
-  status: 'draft' | 'processed' | 'uploaded' | 'failed';
+  runState: RunState;
+  progress?: number;
+  lastError?: string;
+  thumbnailPath?: string;
   part1?: Part;
   part2?: Part;
 };
@@ -38,11 +47,18 @@ type State = {
   add: (p: Project) => void;
   update: (id: string, patch: Partial<Project>) => void;
   remove: (id: string) => void;
+  setRunState: (id: string, runState: RunState) => void;
+  setProgress: (id: string, progress: number) => void;
+  setError: (id: string, message: string) => void;
 };
 
-// Persisted to localStorage so projects survive HMR / page reload during dev,
-// AND survive app restarts in production. (Project records are metadata only —
-// the actual video files live on disk under the user's output dir.)
+const STATUS_TO_RUN_STATE: Record<string, RunState> = {
+  draft: 'idle',
+  processed: 'ready',
+  uploaded: 'uploaded',
+  failed: 'error',
+};
+
 export const useProjects = create<State>()(
   persist(
     (set) => ({
@@ -51,7 +67,42 @@ export const useProjects = create<State>()(
       update: (id, patch) =>
         set((s) => ({ projects: s.projects.map((p) => (p.id === id ? { ...p, ...patch } : p)) })),
       remove: (id) => set((s) => ({ projects: s.projects.filter((p) => p.id !== id) })),
+      setRunState: (id, runState) =>
+        set((s) => ({
+          projects: s.projects.map((p) =>
+            p.id === id ? { ...p, runState, progress: undefined } : p,
+          ),
+        })),
+      setProgress: (id, progress) =>
+        set((s) => ({
+          projects: s.projects.map((p) => (p.id === id ? { ...p, progress } : p)),
+        })),
+      setError: (id, message) =>
+        set((s) => ({
+          projects: s.projects.map((p) =>
+            p.id === id
+              ? { ...p, runState: 'error' as const, lastError: message, progress: undefined }
+              : p,
+          ),
+        })),
     }),
-    { name: 'khutbah-projects', storage: createJSONStorage(() => localStorage) },
+    {
+      name: 'khutbah-projects',
+      version: 1,
+      storage: createJSONStorage(() => localStorage),
+      migrate: (persistedState, version) => {
+        if (version === 0) {
+          const old = persistedState as { projects?: Array<Record<string, unknown>> };
+          const projects = (old.projects ?? []).map((p) => {
+            const status = typeof p.status === 'string' ? p.status : undefined;
+            const { status: _drop, ...rest } = p;
+            void _drop;
+            return { ...rest, runState: STATUS_TO_RUN_STATE[status ?? 'draft'] ?? 'idle' };
+          });
+          return { projects };
+        }
+        return persistedState;
+      },
+    },
   ),
 );

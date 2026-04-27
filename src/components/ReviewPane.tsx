@@ -32,7 +32,7 @@ export function ReviewPane({ project, onAccept, onNudge }: ReviewPaneProps) {
           role="tab"
           aria-selected={active === 'part1'}
           onClick={() => setActive('part1')}
-          className={`flex-1 py-2 rounded ${active === 'part1' ? 'bg-amber-400 text-slate-900 font-semibold' : 'bg-slate-800 text-slate-200'}`}
+          className={`flex-1 py-2 rounded ${active === 'part1' ? 'bg-amber text-bg-1 font-semibold' : 'bg-bg-3 text-text'}`}
         >
           Part 1
         </button>
@@ -40,7 +40,7 @@ export function ReviewPane({ project, onAccept, onNudge }: ReviewPaneProps) {
           role="tab"
           aria-selected={active === 'part2'}
           onClick={() => setActive('part2')}
-          className={`flex-1 py-2 rounded ${active === 'part2' ? 'bg-amber-400 text-slate-900 font-semibold' : 'bg-slate-800 text-slate-200'}`}
+          className={`flex-1 py-2 rounded ${active === 'part2' ? 'bg-amber text-bg-1 font-semibold' : 'bg-bg-3 text-text'}`}
         >
           Part 2
         </button>
@@ -52,7 +52,7 @@ export function ReviewPane({ project, onAccept, onNudge }: ReviewPaneProps) {
         onNudge={onNudge}
       />
       <div className="flex justify-end">
-        <button onClick={onAccept} className="px-4 py-2 bg-emerald-500 text-slate-900 rounded font-semibold">
+        <button onClick={onAccept} className="px-4 py-2 bg-green text-bg-1 rounded font-semibold">
           Accept &amp; upload
         </button>
       </div>
@@ -83,19 +83,19 @@ function ReviewDetailCard({
   const endKey: Boundary = boundaryPrefix === 'part1' ? 'p1End' : 'p2End';
 
   return (
-    <div className="bg-slate-800 rounded p-3 space-y-2">
+    <div className="bg-bg-3 rounded p-3 space-y-2">
       <div className="flex justify-between text-sm">
-        <span className="text-slate-400">{partLabel}</span>
-        <span className={review ? 'text-amber-400' : 'text-emerald-400'}>
+        <span className="text-text-dim">{partLabel}</span>
+        <span className={review ? 'text-amber' : 'text-green'}>
           {Math.round(conf)}% {review ? 'review' : '✓'}
         </span>
       </div>
-      <div className="font-mono text-xs text-slate-300">{fmt(part.start)} → {fmt(part.end)}</div>
+      <div className="font-mono text-xs text-text">{fmt(part.start)} → {fmt(part.end)}</div>
       <div className="flex gap-2 text-xs">
-        <button onClick={() => onNudge(startKey, -5)} className="flex-1 py-1.5 bg-slate-900 border border-slate-700 rounded text-slate-200">Start −5s</button>
-        <button onClick={() => onNudge(startKey, +5)} className="flex-1 py-1.5 bg-slate-900 border border-slate-700 rounded text-slate-200">Start +5s</button>
-        <button onClick={() => onNudge(endKey, -5)} className="flex-1 py-1.5 bg-slate-900 border border-slate-700 rounded text-slate-200">End −5s</button>
-        <button onClick={() => onNudge(endKey, +5)} className="flex-1 py-1.5 bg-slate-900 border border-slate-700 rounded text-slate-200">End +5s</button>
+        <button onClick={() => onNudge(startKey, -5)} className="flex-1 py-1.5 bg-bg-1 border border-border-strong rounded text-text">Start −5s</button>
+        <button onClick={() => onNudge(startKey, +5)} className="flex-1 py-1.5 bg-bg-1 border border-border-strong rounded text-text">Start +5s</button>
+        <button onClick={() => onNudge(endKey, -5)} className="flex-1 py-1.5 bg-bg-1 border border-border-strong rounded text-text">End −5s</button>
+        <button onClick={() => onNudge(endKey, +5)} className="flex-1 py-1.5 bg-bg-1 border border-border-strong rounded text-text">End +5s</button>
       </div>
     </div>
   );

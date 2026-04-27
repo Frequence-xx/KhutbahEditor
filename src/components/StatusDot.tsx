@@ -1,14 +1,14 @@
 import type { RunState } from '../store/projects';
 
 const COLOR_BY_STATE: Record<RunState, string> = {
-  idle: 'bg-slate-500',
-  detecting: 'bg-amber-400 animate-pulse',
-  cutting: 'bg-amber-400 animate-pulse',
-  needs_review: 'bg-amber-500',
-  ready: 'bg-emerald-500',
-  uploading: 'bg-amber-400 animate-pulse',
-  uploaded: 'bg-blue-500',
-  error: 'bg-red-500',
+  idle: 'bg-border-slate',
+  detecting: 'bg-amber animate-pulse',
+  cutting: 'bg-amber animate-pulse',
+  needs_review: 'bg-amber-dark',
+  ready: 'bg-green',
+  uploading: 'bg-amber animate-pulse',
+  uploaded: 'bg-green',
+  error: 'bg-danger',
 };
 
 const LABEL_BY_STATE: Record<RunState, string> = {

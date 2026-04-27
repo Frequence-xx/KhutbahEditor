@@ -125,7 +125,7 @@ export function Shell() {
   }
 
   return (
-    <div className="h-screen flex bg-slate-900 text-slate-100">
+    <div className="h-screen flex bg-bg-1 text-text-strong">
       <Sidebar
         selectedId={selectedProjectId}
         onSelect={select}

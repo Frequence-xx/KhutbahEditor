@@ -57,13 +57,13 @@ export function UploadPane({ project, projectName, onStart }: UploadPaneProps) {
 
   return (
     <div className="h-full p-4 flex flex-col gap-3 overflow-auto">
-      <h2 className="font-display text-xl text-amber-300">Upload to YouTube</h2>
+      <h2 className="font-display text-xl text-amber-glow">Upload to YouTube</h2>
 
-      <label className="text-sm text-slate-300">Account</label>
+      <label className="text-sm text-text">Account</label>
       <select
         value={channelId}
         onChange={(e) => setChannelId(e.target.value)}
-        className="px-3 py-2 bg-slate-900 border border-slate-700 text-slate-100 rounded"
+        className="px-3 py-2 bg-bg-1 border border-border-strong text-text-strong rounded"
       >
         {accounts.map((a) => (
           <option key={a.channelId} value={a.channelId}>
@@ -72,19 +72,19 @@ export function UploadPane({ project, projectName, onStart }: UploadPaneProps) {
         ))}
       </select>
 
-      <label className="text-sm text-slate-300">Title</label>
+      <label className="text-sm text-text">Title</label>
       <input
         type="text"
         value={title}
         onChange={(e) => setTitle(e.target.value)}
-        className="px-3 py-2 bg-slate-900 border border-slate-700 text-slate-100 rounded"
+        className="px-3 py-2 bg-bg-1 border border-border-strong text-text-strong rounded"
       />
 
-      <label className="text-sm text-slate-300">Playlist (optional)</label>
+      <label className="text-sm text-text">Playlist (optional)</label>
       <select
         value={playlistId}
         onChange={(e) => setPlaylistId(e.target.value)}
-        className="px-3 py-2 bg-slate-900 border border-slate-700 text-slate-100 rounded"
+        className="px-3 py-2 bg-bg-1 border border-border-strong text-text-strong rounded"
       >
         <option value="">— none —</option>
         {playlists.map((p) => (
@@ -94,21 +94,21 @@ export function UploadPane({ project, projectName, onStart }: UploadPaneProps) {
         ))}
       </select>
 
-      <label className="text-sm text-slate-300">Thumbnail (optional)</label>
+      <label className="text-sm text-text">Thumbnail (optional)</label>
       <div className="flex gap-2">
         <input
           type="text"
           value={thumbnailPath}
           readOnly
           placeholder="No thumbnail"
-          className="flex-1 px-3 py-2 bg-slate-900 border border-slate-700 text-slate-100 rounded"
+          className="flex-1 px-3 py-2 bg-bg-1 border border-border-strong text-text-strong rounded"
         />
         <button
           onClick={async () => {
             const path = await window.khutbah?.dialog.openVideo();
             if (path) setThumbnailPath(path);
           }}
-          className="px-3 py-2 bg-slate-700 text-slate-100 rounded"
+          className="px-3 py-2 bg-bg-4 text-text-strong rounded"
         >
           Browse
         </button>
@@ -125,14 +125,14 @@ export function UploadPane({ project, projectName, onStart }: UploadPaneProps) {
               thumbnailPath: thumbnailPath || undefined,
             })
           }
-          className="px-4 py-2 bg-emerald-500 text-slate-900 rounded font-semibold disabled:opacity-50"
+          className="px-4 py-2 bg-green text-bg-1 rounded font-semibold disabled:opacity-50"
         >
           {inFlight ? 'Uploading…' : 'Upload'}
         </button>
       </div>
 
       {inFlight && project.progress !== undefined && (
-        <p className="text-slate-300 text-sm">Progress: {project.progress}%</p>
+        <p className="text-text text-sm">Progress: {project.progress}%</p>
       )}
     </div>
   );

@@ -16,10 +16,10 @@ describe('StatusDot', () => {
     expect(dot.className).toMatch(/bg-amber/);
   });
 
-  it('renders a red dot for error', () => {
+  it('renders a danger dot for error', () => {
     render(<StatusDot runState="error" />);
     const dot = screen.getByLabelText('Status: error');
-    expect(dot.className).toMatch(/bg-red/);
+    expect(dot.className).toMatch(/bg-danger/);
   });
 
   it('renders a pulsing gold dot for detecting', () => {
@@ -28,9 +28,9 @@ describe('StatusDot', () => {
     expect(dot.className).toMatch(/animate-pulse/);
   });
 
-  it('renders a blue dot for uploaded', () => {
+  it('renders a green dot for uploaded', () => {
     render(<StatusDot runState="uploaded" />);
     const dot = screen.getByLabelText('Status: uploaded');
-    expect(dot.className).toMatch(/bg-blue/);
+    expect(dot.className).toMatch(/bg-green/);
   });
 });

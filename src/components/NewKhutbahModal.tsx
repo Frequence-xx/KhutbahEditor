@@ -48,26 +48,26 @@ export function NewKhutbahModal({
       data-testid="modal-backdrop"
       onClick={onClose}
     >
-      <div className="bg-slate-800 rounded-lg p-6 w-[480px]" onClick={(e) => e.stopPropagation()}>
-        <h2 className="font-display text-xl text-amber-300 mb-4">New khutbah</h2>
+      <div className="bg-bg-3 rounded-lg p-6 w-[480px]" onClick={(e) => e.stopPropagation()}>
+        <h2 className="font-display text-xl text-amber-glow mb-4">New khutbah</h2>
         <div role="tablist" className="flex gap-2 mb-4">
           <button
             role="tab"
             aria-selected={tab === 'youtube'}
             onClick={() => setTab('youtube')}
-            className={tab === 'youtube' ? 'px-3 py-1 bg-amber-400 text-slate-900 rounded' : 'px-3 py-1 bg-slate-700 text-slate-200 rounded'}
+            className={tab === 'youtube' ? 'px-3 py-1 bg-amber text-bg-1 rounded' : 'px-3 py-1 bg-bg-4 text-text rounded'}
           >YouTube</button>
           <button
             role="tab"
             aria-selected={tab === 'local'}
             onClick={() => setTab('local')}
-            className={tab === 'local' ? 'px-3 py-1 bg-amber-400 text-slate-900 rounded' : 'px-3 py-1 bg-slate-700 text-slate-200 rounded'}
+            className={tab === 'local' ? 'px-3 py-1 bg-amber text-bg-1 rounded' : 'px-3 py-1 bg-bg-4 text-text rounded'}
           >Local file</button>
           <button
             role="tab"
             aria-selected={tab === 'dual'}
             onClick={() => setTab('dual')}
-            className={tab === 'dual' ? 'px-3 py-1 bg-amber-400 text-slate-900 rounded' : 'px-3 py-1 bg-slate-700 text-slate-200 rounded'}
+            className={tab === 'dual' ? 'px-3 py-1 bg-amber text-bg-1 rounded' : 'px-3 py-1 bg-bg-4 text-text rounded'}
           >Dual file</button>
         </div>
 
@@ -77,7 +77,7 @@ export function NewKhutbahModal({
             placeholder="YouTube URL"
             value={youtubeUrl}
             onChange={(e) => setYoutubeUrl(e.target.value)}
-            className="w-full px-3 py-2 bg-slate-900 border border-slate-700 text-slate-100 rounded"
+            className="w-full px-3 py-2 bg-bg-1 border border-border-strong text-text-strong rounded"
           />
         )}
 
@@ -88,28 +88,28 @@ export function NewKhutbahModal({
               placeholder="No file selected"
               value={localPath}
               readOnly
-              className="flex-1 px-3 py-2 bg-slate-900 border border-slate-700 text-slate-100 rounded"
+              className="flex-1 px-3 py-2 bg-bg-1 border border-border-strong text-text-strong rounded"
             />
-            <button onClick={pickLocal} className="px-3 py-2 bg-slate-700 text-slate-100 rounded">Browse</button>
+            <button onClick={pickLocal} className="px-3 py-2 bg-bg-4 text-text-strong rounded">Browse</button>
           </div>
         )}
 
         {tab === 'dual' && (
           <div className="space-y-2">
             <div className="flex gap-2">
-              <input type="text" placeholder="Audio file" value={dualAudio} readOnly className="flex-1 px-3 py-2 bg-slate-900 border border-slate-700 text-slate-100 rounded" />
-              <button onClick={pickDualAudio} className="px-3 py-2 bg-slate-700 text-slate-100 rounded">Browse</button>
+              <input type="text" placeholder="Audio file" value={dualAudio} readOnly className="flex-1 px-3 py-2 bg-bg-1 border border-border-strong text-text-strong rounded" />
+              <button onClick={pickDualAudio} className="px-3 py-2 bg-bg-4 text-text-strong rounded">Browse</button>
             </div>
             <div className="flex gap-2">
-              <input type="text" placeholder="Video file" value={dualVideo} readOnly className="flex-1 px-3 py-2 bg-slate-900 border border-slate-700 text-slate-100 rounded" />
-              <button onClick={pickDualVideo} className="px-3 py-2 bg-slate-700 text-slate-100 rounded">Browse</button>
+              <input type="text" placeholder="Video file" value={dualVideo} readOnly className="flex-1 px-3 py-2 bg-bg-1 border border-border-strong text-text-strong rounded" />
+              <button onClick={pickDualVideo} className="px-3 py-2 bg-bg-4 text-text-strong rounded">Browse</button>
             </div>
           </div>
         )}
 
         <div className="flex justify-end gap-2 mt-6">
-          <button onClick={onClose} className="px-4 py-2 text-slate-300 hover:text-slate-100">Cancel</button>
-          <button onClick={submit} className="px-4 py-2 bg-emerald-500 text-slate-900 rounded font-semibold">Start</button>
+          <button onClick={onClose} className="px-4 py-2 text-text hover:text-text-strong">Cancel</button>
+          <button onClick={submit} className="px-4 py-2 bg-green text-bg-1 rounded font-semibold">Start</button>
         </div>
       </div>
     </div>

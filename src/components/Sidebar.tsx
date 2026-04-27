@@ -36,13 +36,13 @@ export function Sidebar({ selectedId, onSelect, onNew, onSettings, onDelete }: S
   const sorted = [...projects].sort((a, b) => b.createdAt - a.createdAt);
 
   return (
-    <aside className="w-60 bg-slate-950 border-r border-slate-800 flex flex-col">
-      <div className="px-4 py-4 border-b border-slate-800 text-amber-300 font-display">
+    <aside className="w-60 bg-bg-0 border-r border-border flex flex-col">
+      <div className="px-4 py-4 border-b border-border text-amber-glow font-display">
         KhutbahEditor
       </div>
       <button
         onClick={onNew}
-        className="m-2 px-3 py-2 bg-amber-400 text-slate-900 rounded font-semibold text-sm"
+        className="m-2 px-3 py-2 bg-amber text-bg-1 rounded font-semibold text-sm"
       >
         + New khutbah
       </button>
@@ -53,23 +53,23 @@ export function Sidebar({ selectedId, onSelect, onNew, onSettings, onDelete }: S
           return (
             <div
               key={p.id}
-              className={`group relative w-full flex items-center gap-2 px-2 py-2 rounded mb-1 ${isActive ? 'bg-slate-800' : 'hover:bg-slate-900'}`}
+              className={`group relative w-full flex items-center gap-2 px-2 py-2 rounded mb-1 ${isActive ? 'bg-bg-3' : 'hover:bg-bg-1'}`}
             >
               <button
                 onClick={() => onSelect(p.id)}
                 className="flex-1 flex items-center gap-2 text-left min-w-0"
               >
-                <div className="relative w-12 h-8 bg-slate-700 rounded flex-shrink-0">
+                <div className="relative w-12 h-8 bg-bg-4 rounded flex-shrink-0">
                   {p.thumbnailPath && (
                     <img src={`file://${p.thumbnailPath}`} alt="" className="w-full h-full object-cover rounded" />
                   )}
-                  <span className="absolute -top-0.5 -right-0.5 ring-1 ring-slate-950 rounded-full">
+                  <span className="absolute -top-0.5 -right-0.5 ring-1 ring-bg-0 rounded-full">
                     <StatusDot runState={p.runState} />
                   </span>
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="text-slate-100 text-xs truncate">{name}</div>
-                  <div className="text-slate-500 text-[10px] truncate">{subtitleFor(p)}</div>
+                  <div className="text-text-strong text-xs truncate">{name}</div>
+                  <div className="text-text-muted text-[10px] truncate">{subtitleFor(p)}</div>
                 </div>
               </button>
               {onDelete && (
@@ -80,7 +80,7 @@ export function Sidebar({ selectedId, onSelect, onNew, onSettings, onDelete }: S
                     e.stopPropagation();
                     onDelete(p.id);
                   }}
-                  className="opacity-0 group-hover:opacity-100 focus:opacity-100 px-1.5 text-slate-400 hover:text-danger text-sm rounded"
+                  className="opacity-0 group-hover:opacity-100 focus:opacity-100 px-1.5 text-text-dim hover:text-danger text-sm rounded"
                 >
                   ×
                 </button>
@@ -91,7 +91,7 @@ export function Sidebar({ selectedId, onSelect, onNew, onSettings, onDelete }: S
       </div>
       <button
         onClick={onSettings}
-        className="m-2 px-3 py-2 bg-transparent text-slate-400 border border-slate-700 rounded text-sm"
+        className="m-2 px-3 py-2 bg-transparent text-text-dim border border-border-strong rounded text-sm"
       >
         ⚙ Settings
       </button>

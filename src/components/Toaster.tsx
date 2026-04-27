@@ -20,7 +20,7 @@ export function Toaster() {
           key={t.id}
           role="status"
           onClick={() => dismiss(t.id)}
-          className={`px-4 py-2 rounded shadow-lg cursor-pointer text-sm ${t.kind === 'success' ? 'bg-emerald-500 text-slate-900' : 'bg-red-500 text-white'}`}
+          className={`px-4 py-2 rounded shadow-lg cursor-pointer text-sm ${t.kind === 'success' ? 'bg-green text-bg-1' : 'bg-danger text-white'}`}
         >
           {t.message}
         </div>

@@ -1499,6 +1499,13 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 - **`fireCut` signature** — `fireCut(projectId, partKey: 'p1' | 'p2')`, not `fireCut(projectId)`. So retry needs to know **which** part to re-cut.
 - **New Project field: `lastFailedCutPart`** — stored alongside `lastFailedKind` on cut errors so retry can target the correct part. Kept as a separate field rather than encoding `'cut-p1'|'cut-p2'` into the kind union — keeps the kind union short and lets the cut path read its own state.
 
+**Post-landing fixes (commit after `ec46ab1`, four interrelated tweaks the code reviewer flagged before Task 16's `ErrorPane` consumes these fields):**
+
+1. **`lastUploadOpts` persists at the top of `startUpload`, not after `auth.accessToken`** — the original draft stored opts inside `runUpload` after the auth await, so an auth-itself-rejection would leave the project with `lastFailedKind: 'upload'` but no `lastUploadOpts` — Retry would silently no-op. Move the `update({ lastUploadOpts })` call to the top of `startUpload` (before the abort/inFlight wiring even). The `runUpload` body keeps the `setRunState('uploading')` transition but no longer re-stores opts.
+2. **Clear `lastError` / `lastFailedKind` / `lastFailedCutPart` at the top of every `start*` (and `fireCut`)** — failure fields belong to the previous run; the new run shouldn't carry them. Without this, `ErrorPane` (Task 16) reads stale failure metadata after a successful retry. The clear lives just before the `setRunState(...)` call in each entry method. For `startUpload` it goes AFTER the new `update({ lastUploadOpts })` so the new opts survive.
+3. **`retry` guards `runState === 'error'`** — without this, a double-click after a successful retry re-fires the still-set `lastFailedKind` on an already-successful project (concrete repro: detect fails → Retry succeeds → user accidentally double-clicks Retry → detect runs a second time, blowing away nudged boundaries). Add `if (project.runState !== 'error') return;` BEFORE the lastFailedKind switch.
+4. **Two new tests in `tests/renderer/JobManager.retry.test.ts`** — one asserting the runState-guard noop (project with `runState: 'ready'` + lingering `lastFailedKind: 'detect'` does NOT call `detect.run`), one asserting a successful retry clears `lastError`/`lastFailedKind` (after microtask drain). Brings the file from 7 to 9 tests, full renderer suite from 73 to 75.
+
 - [ ] **Step 1: Write the failing tests**
 
 First, extend `tests/renderer/projects.runState.test.ts` with a test for the new `kind` parameter:

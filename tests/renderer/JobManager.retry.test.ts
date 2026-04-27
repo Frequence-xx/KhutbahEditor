@@ -197,4 +197,61 @@ describe('JobManager.retry', () => {
 
     expect(call).not.toHaveBeenCalled();
   });
+
+  it('noop when runState is not "error" (guards against double-click after success)', () => {
+    // Repro: detect failed → retry succeeded (runState is now 'ready'), but
+    // lastFailedKind/lastError still linger because ErrorPane has not yet
+    // re-rendered. A second Retry click must NOT re-fire detect.
+    useProjects.setState({
+      projects: [
+        {
+          id: 'p1',
+          sourcePath: '/x.mp4',
+          duration: 1,
+          createdAt: 1,
+          runState: 'ready',
+          lastError: 'old failure',
+          lastFailedKind: 'detect',
+        },
+      ],
+    });
+    const call = vi.fn();
+    const bridge = makeBridge(call as Bridge['call']);
+    const jm = new JobManager(bridge);
+
+    jm.retry('p1');
+
+    expect(call).not.toHaveBeenCalled();
+    expect(bridge.auth.accessToken).not.toHaveBeenCalled();
+  });
+
+  it('a successful retry clears lastError and lastFailedKind', async () => {
+    useProjects.setState({
+      projects: [
+        {
+          id: 'p1',
+          sourcePath: '/x.mp4',
+          duration: 1,
+          createdAt: 1,
+          runState: 'error',
+          lastError: 'crash',
+          lastFailedKind: 'detect',
+        },
+      ],
+    });
+    const call = vi.fn((method: string) => {
+      if (method === 'edit.thumbnails') return Promise.resolve({ paths: [] });
+      if (method === 'detect.run') return Promise.resolve(detectOk);
+      return Promise.reject(new Error('unexpected ' + method));
+    });
+    const jm = new JobManager(makeBridge(call as Bridge['call']));
+
+    jm.retry('p1');
+    await new Promise((r) => setTimeout(r, 5));
+
+    const p = useProjects.getState().projects[0];
+    expect(p.runState).toBe('ready');
+    expect(p.lastError).toBeUndefined();
+    expect(p.lastFailedKind).toBeUndefined();
+  });
 });

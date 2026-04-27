@@ -51,6 +51,12 @@ export class JobManager {
     });
     this.inFlight.set(projectId, { kind: 'detect', abort, unsubscribe });
 
+    // Failure fields belong to the previous run; the new run shouldn't carry them.
+    useProjects.getState().update(projectId, {
+      lastError: undefined,
+      lastFailedKind: undefined,
+      lastFailedCutPart: undefined,
+    });
     useProjects.getState().setRunState(projectId, 'detecting');
 
     // Best-effort thumbnail extraction (spec §6). Failure must not block detection.
@@ -138,6 +144,12 @@ export class JobManager {
     });
     this.inFlight.set(projectId, { kind: 'cut', abort, unsubscribe });
 
+    // Failure fields belong to the previous run; the new run shouldn't carry them.
+    useProjects.getState().update(projectId, {
+      lastError: undefined,
+      lastFailedKind: undefined,
+      lastFailedCutPart: undefined,
+    });
     useProjects.getState().setRunState(projectId, 'cutting');
 
     const dst = JobManager.cutDst(project.sourcePath, partKey);
@@ -176,6 +188,16 @@ export class JobManager {
     const project = useProjects.getState().projects.find((p) => p.id === projectId);
     if (!project) return;
 
+    // Persist opts BEFORE any await so retry can replay even if auth itself
+    // rejects (which happens before runUpload's pre-uploading update would fire).
+    useProjects.getState().update(projectId, { lastUploadOpts: opts });
+    // Failure fields belong to the previous run; the new run shouldn't carry them.
+    useProjects.getState().update(projectId, {
+      lastError: undefined,
+      lastFailedKind: undefined,
+      lastFailedCutPart: undefined,
+    });
+
     const abort = new AbortController();
     const unsubscribe = this.bridge.onProgress((ev: ProgressEvent) => {
       if (ev.projectId === projectId) {
@@ -200,8 +222,9 @@ export class JobManager {
       const { accessToken } = await this.bridge.auth.accessToken(opts.channelId);
       if (abort.signal.aborted) return;
 
-      // Persist opts so retry can resume even if Part 1 fails immediately.
-      useProjects.getState().update(projectId, { lastUploadOpts: opts });
+      // (lastUploadOpts and stale-failure clears were persisted in startUpload
+      // BEFORE this await, so an auth rejection still leaves opts available
+      // for retry.)
       useProjects.getState().setRunState(projectId, 'uploading');
 
       // Part 1 — skip if already uploaded for this channel
@@ -305,7 +328,12 @@ export class JobManager {
   }
   retry(projectId: string): void {
     const project = useProjects.getState().projects.find((p) => p.id === projectId);
-    if (!project?.lastFailedKind) return;
+    if (!project) return;
+    // Guard against double-clicks after a successful retry: lastFailedKind
+    // can linger across a successful run if the next start* hasn't fired yet.
+    // Only an actual error state should re-trigger work.
+    if (project.runState !== 'error') return;
+    if (!project.lastFailedKind) return;
 
     switch (project.lastFailedKind) {
       case 'detect':

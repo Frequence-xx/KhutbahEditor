@@ -75,7 +75,7 @@ export function Shell() {
     });
     select(id);
     void window
-      .khutbah!.pipeline.call('align.dual_file', { id, audioPath, videoPath })
+      .khutbah!.pipeline.call('align.dual_file', { video_path: videoPath, audio_path: audioPath })
       .then(() => jm.startDetect(id));
     setModalOpen(false);
   };

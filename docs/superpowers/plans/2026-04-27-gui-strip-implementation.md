@@ -3536,6 +3536,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 - `Bridge` (from Task 6) requires an `auth.accessToken(channelId)` namespace in addition to `call` + `onProgress`. The `bridge` literal in Shell **must** include it; TypeScript will reject any `Bridge` literal that omits it.
 - `UploadPane` (Task 14) and `SettingsPane` (Task 15) both call `window.khutbah.auth.accessToken/signIn/signOut` on mount. The Shell test must therefore stub all three on the `khutbah.auth` mock, not just `listAccounts`.
 - The Sidebar (Task 19) renders the project's status text/progress alongside each row. So in Shell-level tests, both the error message ("boom") and the "42%" progress string appear in **two** places (sidebar subtitle + main pane). Use `getAllByText(...).length >= 1` rather than `getByText(...)`. The DetectingPane's `progressbar` role still uniquely identifies the main pane.
+- `align.dual_file` sidecar contract is snake_case: `{ video_path, audio_path }` — no `id` field. See `python-pipeline/khutbah_pipeline/__main__.py:28-30` and the existing caller `src/App.tsx:174-177`. The `handleSubmitDual` call must pass `{ video_path: videoPath, audio_path: audioPath }`, not `{ id, audioPath, videoPath }`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -3716,8 +3717,9 @@ export function Shell() {
       id, sourcePath: videoPath, duration: 0, createdAt: Date.now(), runState: 'idle',
     });
     select(id);
-    // dual-file alignment + detect; relies on the alignment RPC inside autopilot.ts
-    void window.khutbah!.pipeline.call('align.dual_file', { id, audioPath, videoPath })
+    // dual-file alignment + detect; relies on the alignment RPC inside autopilot.ts.
+    // Sidecar contract is snake_case { video_path, audio_path } — see contract note above.
+    void window.khutbah!.pipeline.call('align.dual_file', { video_path: videoPath, audio_path: audioPath })
       .then(() => jm.startDetect(id));
     setModalOpen(false);
   };

@@ -46,6 +46,12 @@ export type Project = {
   createdAt: number;
   runState: RunState;
   progress?: number;
+  /** Sub-stage label from the sidecar (e.g. "vad", "transcribe") — transient, cleared on runState change. */
+  progressStage?: string;
+  /** Human-readable progress message from the sidecar — transient. */
+  progressMessage?: string;
+  /** Estimated seconds remaining for the active stage — transient. */
+  progressEtaSeconds?: number;
   lastError?: string;
   lastFailedKind?: 'detect' | 'cut' | 'upload';
   lastFailedCutPart?: 'p1' | 'p2';
@@ -83,7 +89,16 @@ export const useProjects = create<State>()(
       setRunState: (id, runState) =>
         set((s) => ({
           projects: s.projects.map((p) =>
-            p.id === id ? { ...p, runState, progress: undefined } : p,
+            p.id === id
+              ? {
+                  ...p,
+                  runState,
+                  progress: undefined,
+                  progressStage: undefined,
+                  progressMessage: undefined,
+                  progressEtaSeconds: undefined,
+                }
+              : p,
           ),
         })),
       setProgress: (id, progress) =>

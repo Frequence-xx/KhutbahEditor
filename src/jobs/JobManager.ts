@@ -2,6 +2,7 @@ import type { Boundary, Bridge, JobKind, ProgressEvent, UploadOpts } from './typ
 import { useProjects } from '../store/projects';
 import { useUi } from '../store/ui';
 import { useToasts } from '../store/toasts';
+import { withETA, type EnrichedProgress } from '../lib/eta';
 
 type InFlight = {
   kind: JobKind;
@@ -32,11 +33,34 @@ const REVIEW_THRESHOLD = 0.9;
 export class JobManager {
   private inFlight = new Map<string, InFlight>();
   private debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private progressState = new Map<string, EnrichedProgress | null>();
   private static readonly NUDGE_DEBOUNCE_MS = 250;
   constructor(private bridge: Bridge) {}
 
   private static cutDst(sourcePath: string, partKey: 'p1' | 'p2'): string {
     return `${sourcePath}.cut-${partKey}.mp4`;
+  }
+
+  /**
+   * Convert one sidecar progress event into a store update for `projectId`.
+   * Sidecar emits `progress` as 0–1.0; the store + UI use 0–100. Run through
+   * withETA so DetectingPane can show a live ETA.
+   */
+  private applyProgress(projectId: string, ev: ProgressEvent): void {
+    const rawPct =
+      typeof ev.progress === 'number' ? Math.round(ev.progress * 100) : undefined;
+    const next = withETA(this.progressState.get(projectId) ?? null, {
+      stage: ev.stage ?? '',
+      message: ev.message ?? '',
+      progress: rawPct,
+    });
+    this.progressState.set(projectId, next);
+    useProjects.getState().update(projectId, {
+      progress: next.progress,
+      progressStage: next.stage || undefined,
+      progressMessage: next.message || undefined,
+      progressEtaSeconds: next.etaSeconds,
+    });
   }
 
   private toast(
@@ -111,9 +135,9 @@ export class JobManager {
 
     const abort = new AbortController();
     const unsubscribe = this.bridge.onProgress((ev: ProgressEvent) => {
-      if (ev.projectId === projectId) {
-        useProjects.getState().setProgress(projectId, ev.pct);
-      }
+      // Sidecar processes one job at a time; every event during this
+      // listener's lifetime belongs to projectId.
+      this.applyProgress(projectId, ev);
     });
     this.inFlight.set(projectId, { kind: 'detect', abort, unsubscribe });
 
@@ -208,9 +232,9 @@ export class JobManager {
 
     const abort = new AbortController();
     const unsubscribe = this.bridge.onProgress((ev: ProgressEvent) => {
-      if (ev.projectId === projectId) {
-        useProjects.getState().setProgress(projectId, ev.pct);
-      }
+      // Sidecar processes one job at a time; every event during this
+      // listener's lifetime belongs to projectId.
+      this.applyProgress(projectId, ev);
     });
     this.inFlight.set(projectId, { kind: 'cut', abort, unsubscribe });
 
@@ -271,9 +295,9 @@ export class JobManager {
 
     const abort = new AbortController();
     const unsubscribe = this.bridge.onProgress((ev: ProgressEvent) => {
-      if (ev.projectId === projectId) {
-        useProjects.getState().setProgress(projectId, ev.pct);
-      }
+      // Sidecar processes one job at a time; every event during this
+      // listener's lifetime belongs to projectId.
+      this.applyProgress(projectId, ev);
     });
     this.inFlight.set(projectId, { kind: 'upload', abort, unsubscribe });
 
@@ -439,6 +463,8 @@ export class JobManager {
       job.unsubscribe();
       this.inFlight.delete(projectId);
     }
+    // ETA tracking is per-job; reset so the next run starts fresh.
+    this.progressState.delete(projectId);
   }
   isRunning(projectId: string): boolean {
     return this.inFlight.has(projectId);

@@ -37,8 +37,13 @@ export function Sidebar({ selectedId, onSelect, onNew, onSettings, onDelete }: S
 
   return (
     <aside className="w-60 bg-bg-0 border-r border-border flex flex-col">
-      <div className="px-4 py-4 border-b border-border text-amber-glow font-display">
-        KhutbahEditor
+      <div className="px-4 py-3 border-b border-border flex items-center justify-center">
+        <img
+          src="/logo.png"
+          alt="KhutbahEditor"
+          className="h-28 w-auto select-none"
+          draggable={false}
+        />
       </div>
       <button
         onClick={onNew}
@@ -59,11 +64,11 @@ export function Sidebar({ selectedId, onSelect, onNew, onSettings, onDelete }: S
                 onClick={() => onSelect(p.id)}
                 className="flex-1 flex items-center gap-2 text-left min-w-0"
               >
-                <div className="relative w-12 h-8 bg-bg-4 rounded flex-shrink-0">
+                <div className="relative w-12 h-8 bg-bg-4 rounded flex-shrink-0 overflow-hidden">
                   {p.thumbnailPath && (
-                    <img src={`file://${p.thumbnailPath}`} alt="" className="w-full h-full object-cover rounded" />
+                    <img src={`file://${p.thumbnailPath}`} alt="" className="w-full h-full object-cover" />
                   )}
-                  <span className="absolute -top-0.5 -right-0.5 ring-1 ring-bg-0 rounded-full">
+                  <span className="absolute top-0.5 right-0.5">
                     <StatusDot runState={p.runState} />
                   </span>
                 </div>

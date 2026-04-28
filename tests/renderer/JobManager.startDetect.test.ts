@@ -82,7 +82,7 @@ describe('JobManager.startDetect', () => {
     expect(p.lastError).toBe('sidecar crash');
   });
 
-  it('forwards progress events for the same projectId to setProgress', async () => {
+  it('converts sidecar progress (0–1) to pct (0–100) and persists stage/message', async () => {
     let listener!: (ev: ProgressEvent) => void;
     const call = vi.fn(() => new Promise(() => {}));
     const onProgress = vi.fn((l: (ev: ProgressEvent) => void) => {
@@ -92,11 +92,12 @@ describe('JobManager.startDetect', () => {
     const jm = new JobManager(makeBridge(call as Bridge['call'], onProgress));
     jm.startDetect('p1');
 
-    listener({ projectId: 'p1', stage: 'transcribe', pct: 42 });
-    expect(useProjects.getState().projects[0].progress).toBe(42);
-
-    listener({ projectId: 'other', stage: 'transcribe', pct: 99 });
-    expect(useProjects.getState().projects[0].progress).toBe(42);
+    // Sidecar payload: {stage, message, progress: 0..1, _request_id}
+    listener({ stage: 'transcribe', message: 'Decoding chunk 3/8', progress: 0.42 });
+    const p = useProjects.getState().projects[0];
+    expect(p.progress).toBe(42);
+    expect(p.progressStage).toBe('transcribe');
+    expect(p.progressMessage).toBe('Decoding chunk 3/8');
   });
 
   it('does nothing when projectId is unknown — no bridge call, no listener leak', () => {

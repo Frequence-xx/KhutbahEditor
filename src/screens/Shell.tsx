@@ -104,6 +104,8 @@ export function Shell() {
         projectName={project.sourcePath.split('/').pop() ?? ''}
         progress={project.progress}
         stage={project.runState === 'detecting' ? 'Detecting boundaries' : 'Re-cutting'}
+        message={project.progressMessage}
+        etaSeconds={project.progressEtaSeconds}
       />
     );
   } else if (view === 'upload') {
